@@ -10,7 +10,9 @@ from config import ADMIN_IDS
 
 async def setup_bot_commands(bot):
     private_commands = [
-        BotCommand(command="start", description="запуск і головне меню"),
+        BotCommand(command="start", description="головне меню"),
+        BotCommand(command="buy", description="купити перевірки"),
+        BotCommand(command="limits", description="мій баланс перевірок"),
     ]
 
     await bot.set_my_commands(

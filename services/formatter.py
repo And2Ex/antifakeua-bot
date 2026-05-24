@@ -12,10 +12,12 @@ VERDICT_EMOJIS = {
     "Інше": "ℹ️",
 }
 
+# Додаткові блоки моделі більше не показуються як окремі підзаголовки.
+# Вони додаються звичайними абзацами, щоб відповідь виглядала природніше.
 BLOCK_EMOJIS = {
-    "Деталі": "📌",
-    "Уточнення": "ℹ️",
-    "Застереження": "⚠️",
+    "Деталі": "",
+    "Уточнення": "",
+    "Застереження": "",
 }
 
 LEGACY_BLOCK_TYPES = {
@@ -59,11 +61,8 @@ def format_fact_check_response(result: dict) -> str:
         if is_duplicate_block(block_text, summary, added_block_texts):
             continue
 
-        block_emoji = BLOCK_EMOJIS.get(block_type, "ℹ️")
-
         parts.extend([
             "",
-            f"{block_emoji} <b>{escape_html(block_type)}:</b>",
             escape_html(block_text),
         ])
         added_block_texts.add(normalize_for_compare(block_text))

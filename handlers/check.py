@@ -494,13 +494,7 @@ async def check_text_or_caption_handler(message: Message):
 
 @router.message(F.photo | F.video | F.document | F.animation)
 async def media_without_text_handler(message: Message):
-    if message.chat.type != "private":
-        return
-
-    if message.caption:
-        return
-
-    await message.answer(
-        "У цьому повідомленні немає тексту для перевірки.\n\n"
-        "Надішли текст новини або пересланий допис із підписом."
-    )
+    # Порожні медіа-повідомлення мовчки ігноруємо.
+    # У Telegram альбоми та переслані дописи можуть приходити кількома update-ами,
+    # і відповідь на кожен порожній update створює спам у чаті.
+    return

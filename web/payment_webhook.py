@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -12,6 +14,7 @@ from services.payments import decode_callback_data, verify_callback_signature
 
 
 app = FastAPI(title="AntiFakeUA_Bot payments")
+BOT_POLLING_TASK = None
 LOG_DIR = BASE_DIR / "logs"
 CALLBACK_LOG_PATH = LOG_DIR / "liqpay_callbacks.log"
 
@@ -28,9 +31,49 @@ def write_callback_log(payload: dict):
         file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+@app.on_event("startup")
+async def startup_event():
+    global BOT_POLLING_TASK
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+    from bot import bot as telegram_bot, dp, setup_routers
+    from database.db import init_db
+    from services.commands import setup_bot_commands
+
+    init_db()
+    setup_routers()
+    await setup_bot_commands(telegram_bot)
+
+    BOT_POLLING_TASK = asyncio.create_task(
+        dp.start_polling(
+            telegram_bot,
+            allowed_updates=dp.resolve_used_update_types(),
+        )
+    )
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    from bot import bot as telegram_bot
+
+    if BOT_POLLING_TASK:
+        BOT_POLLING_TASK.cancel()
+
+    await telegram_bot.session.close()
+
+
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "AntiFakeUA_Bot payment webhook"}
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
 
 
 @app.post("/liqpay/callback")

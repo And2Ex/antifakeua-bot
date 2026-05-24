@@ -1,14 +1,8 @@
-import json
+# Публічний prompt AntiFakeUA
 
-from openai import AsyncOpenAI
+Цей prompt описує принципи, за якими AntiFakeUA аналізує текстові новини, заяви та переслані повідомлення.
 
-from config import OPENAI_API_KEY, OPENAI_MODEL
-
-
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
-
-FACT_CHECK_PROMPT = """
+```text
 Ти — фактчекер українського Telegram-бота AntiFakeUA.
 
 Твоє завдання — перевірити надісланий користувачем текст: новину, заяву, пересланий допис або окреме твердження.
@@ -49,118 +43,10 @@ FACT_CHECK_PROMPT = """
 - тільки реальні URL;
 - пріоритет: офіційні джерела, першоджерела, міжнародні агентства, авторитетні медіа;
 - не додавай джерело, якщо воно не підтверджує зміст відповіді.
-"""
+```
 
+## Чому prompt відкритий
 
-FACT_CHECK_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "verdict": {
-            "type": "string",
-            "enum": [
-                "Правда",
-                "Фейк",
-                "Маніпуляція",
-                "Недостатньо даних",
-                "Інше"
-            ]
-        },
-        "summary": {
-            "type": "string"
-        },
-        "blocks": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": [
-                            "Правда",
-                            "Фейк",
-                            "Маніпуляція",
-                            "Уточнення",
-                            "Недостатньо даних"
-                        ]
-                    },
-                    "text": {
-                        "type": "string"
-                    }
-                },
-                "required": ["type", "text"],
-                "additionalProperties": False
-            }
-        },
-        "sources": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "title": {
-                        "type": "string"
-                    },
-                    "url": {
-                        "type": "string"
-                    }
-                },
-                "required": ["title", "url"],
-                "additionalProperties": False
-            }
-        }
-    },
-    "required": ["verdict", "summary", "blocks", "sources"],
-    "additionalProperties": False
-}
+Відкритий prompt потрібен для прозорості. Користувач може побачити правила, за якими бот формує висновок, і самостійно повторити перевірку з тим самим текстом.
 
-
-async def analyze_text(text: str) -> dict:
-    if not OPENAI_API_KEY:
-        return build_error_result(
-            "OPENAI_API_KEY не заданий у .env. Адміністратор має додати API-ключ."
-        )
-
-    try:
-        response = await client.responses.create(
-            model=OPENAI_MODEL,
-            tools=[
-                {
-                    "type": "web_search_preview"
-                }
-            ],
-            input=[
-                {
-                    "role": "developer",
-                    "content": FACT_CHECK_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": text,
-                },
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "fact_check_result",
-                    "strict": True,
-                    "schema": FACT_CHECK_SCHEMA,
-                }
-            },
-        )
-
-        return json.loads(response.output_text)
-
-    except Exception as error:
-        print(f"GPT ERROR: {error}")
-
-        return build_error_result(
-            "Під час аналізу виникла технічна помилка. Спробуй повторити запит пізніше."
-        )
-
-
-def build_error_result(message: str) -> dict:
-    return {
-        "verdict": "Недостатньо даних",
-        "summary": message,
-        "blocks": [],
-        "sources": [],
-    }
+Це не гарантує, що будь-яка AI-відповідь буде ідеальною, але дозволяє краще зрозуміти логіку аналізу та помітити можливі помилки.

@@ -8,7 +8,13 @@ from aiogram.types import (
 )
 
 from database.db import add_user, create_payment
-from services.payments import create_checkout_url, get_package, get_packages_text, PAYMENT_PACKAGES
+from services.payments import (
+    create_checkout_url,
+    format_package_price,
+    get_package,
+    get_packages_text,
+    PAYMENT_PACKAGES,
+)
 
 
 router = Router()
@@ -20,7 +26,7 @@ def build_buy_keyboard() -> InlineKeyboardMarkup:
     for package_id, package in PAYMENT_PACKAGES.items():
         buttons.append([
             InlineKeyboardButton(
-                text=f"💳 {package['title']} — {package['checks']} перевірок",
+                text=f"💳 {package['title']} — {package['checks']} перевірок • {package['amount']:.0f} грн",
                 callback_data=f"buy:{package_id}",
             )
         ])
@@ -40,6 +46,7 @@ async def buy_handler(message: Message):
 
     await message.answer(
         get_packages_text(),
+        parse_mode="HTML",
         reply_markup=build_buy_keyboard(),
     )
 
@@ -48,6 +55,7 @@ async def buy_handler(message: Message):
 async def buy_menu_callback(callback: CallbackQuery):
     await callback.message.answer(
         get_packages_text(),
+        parse_mode="HTML",
         reply_markup=build_buy_keyboard(),
     )
     await callback.answer()
@@ -58,6 +66,7 @@ async def buy_package_callback(callback: CallbackQuery):
     if callback.data == "buy:menu":
         await callback.message.answer(
             get_packages_text(),
+            parse_mode="HTML",
             reply_markup=build_buy_keyboard(),
         )
         await callback.answer()
@@ -109,11 +118,12 @@ async def buy_package_callback(callback: CallbackQuery):
     )
 
     await callback.message.answer(
-        "Платіж створено.\n\n"
-        f"Пакет: {package['title']}\n"
-        f"Перевірок: {package['checks']}\n"
-        f"Сума: {package['amount']:.0f} {package['currency']}\n\n"
-        "Після успішної оплати перевірки автоматично додадуться до твого платного балансу.",
+        "✅ <b>Платіж створено</b>\n\n"
+        f"<b>Пакет:</b> {package['title']}\n"
+        f"<b>Перевірок:</b> {package['checks']}\n"
+        f"<b>Акційна ціна:</b> {format_package_price(package)}\n\n"
+        "Після успішної оплати перевірки автоматично додадуться до платного балансу.",
+        parse_mode="HTML",
         reply_markup=keyboard,
     )
 

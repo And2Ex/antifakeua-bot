@@ -10,7 +10,7 @@ def format_public_check(request) -> str:
     parts = [
         "🔎 <b>Публічна перевірка AntiFakeUA</b>",
         "",
-        f"<b>ID:</b> {escape_html(request['public_id'])}",
+        f"<b>Код перевірки:</b> <code>{escape_html(request['public_id'])}</code>",
         f"<b>Підсумок:</b> {escape_html(verdict)}",
     ]
 
@@ -19,11 +19,12 @@ def format_public_check(request) -> str:
 
     parts.extend([
         "",
-        "<b>Перевірений текст:</b>",
+        "<b>Що перевіряли:</b>",
         escape_html(request_text),
         "",
         response_text,
         "",
+        "Цю перевірку можна переслати іншим — вона відкриється через цей самий код без повторного аналізу.",
         "Перевірено через @AntiFakeUA_Bot",
     ])
 

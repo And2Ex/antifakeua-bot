@@ -14,18 +14,22 @@ from config import (
 
 LIQPAY_CHECKOUT_URL = "https://www.liqpay.ua/api/3/checkout"
 
+PROMO_LABEL = "Тестовий запуск — знижка 90%"
+
 PAYMENT_PACKAGES = {
     "basic": {
         "title": "Basic",
         "checks": 100,
-        "amount": 99.0,
+        "amount": 10.0,
+        "old_amount": 99.0,
         "currency": "UAH",
         "description": "100 перевірок AntiFakeUA_Bot",
     },
     "pro": {
         "title": "Pro",
         "checks": 1000,
-        "amount": 499.0,
+        "amount": 50.0,
+        "old_amount": 499.0,
         "currency": "UAH",
         "description": "1000 перевірок AntiFakeUA_Bot",
     },
@@ -36,20 +40,35 @@ def get_package(package_id: str) -> dict | None:
     return PAYMENT_PACKAGES.get(package_id)
 
 
+def format_package_price(package: dict) -> str:
+    old_amount = package.get("old_amount")
+    amount = package["amount"]
+    currency = package["currency"]
+
+    if old_amount and old_amount > amount:
+        return f"<s>{old_amount:.0f} {currency}</s> → <b>{amount:.0f} {currency}</b>"
+
+    return f"<b>{amount:.0f} {currency}</b>"
+
+
 def get_packages_text() -> str:
     lines = [
-        "Доступні пакети:",
+        "💳 <b>Пакети перевірок</b>",
+        "",
+        f"🎁 <b>{PROMO_LABEL}</b>",
+        "На період першого тестування пакети коштують у 10 разів дешевше.",
         "",
     ]
 
-    for package_id, package in PAYMENT_PACKAGES.items():
+    for package in PAYMENT_PACKAGES.values():
         lines.append(
-            f"• {package['title']} — {package['checks']} перевірок за {package['amount']:.0f} {package['currency']}"
+            f"• <b>{package['title']}</b> — {package['checks']} перевірок: {format_package_price(package)}"
         )
 
     lines.extend([
         "",
         "Після успішної оплати перевірки автоматично додаються до платного балансу.",
+        "Баланс можна подивитися в меню: <b>Мої ліміти</b>.",
     ])
 
     return "\n".join(lines)

@@ -37,6 +37,7 @@ LIQPAY_PRIVATE_KEY = os.getenv("LIQPAY_PRIVATE_KEY", "").strip()
 LIQPAY_SANDBOX = os.getenv("LIQPAY_SANDBOX", "1").strip() == "1"
 BASE_WEBHOOK_URL = os.getenv("BASE_WEBHOOK_URL", "").strip().rstrip("/")
 PAYMENT_RESULT_URL = os.getenv("PAYMENT_RESULT_URL", "").strip()
+SUPPORT_JAR_URL = os.getenv("SUPPORT_JAR_URL", "https://send.monobank.ua/jar/AgE5cQTo4P").strip()
 
 
 def parse_admin_ids(value: str) -> set[int]:

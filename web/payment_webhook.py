@@ -10,7 +10,7 @@ from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from config import BASE_DIR, BASE_WEBHOOK_URL, BOT_TOKEN, GITHUB_URL, LIQPAY_SANDBOX, METHODOLOGY_URL, PAYMENT_RESULT_URL
+from config import BASE_DIR, BASE_WEBHOOK_URL, BOT_TOKEN, GITHUB_URL, LIQPAY_SANDBOX, METHODOLOGY_URL, PAYMENT_RESULT_URL, SUPPORT_JAR_URL
 from database.db import process_successful_payment
 from services.admin_notifications import notify_payment_credited
 from services.payments import decode_callback_data, verify_callback_signature
@@ -256,13 +256,21 @@ async def liqpay_callback(request: Request):
 
         try:
             if LIQPAY_SANDBOX:
+                support_line = (
+                    f'\n\nЯкщо сервіс корисний, можеш підтримати розвиток бота донатом:\n'
+                    f'<a href="{SUPPORT_JAR_URL}">Підтримати AntiFakeUA</a>'
+                    if SUPPORT_JAR_URL
+                    else ""
+                )
+
                 success_text = (
                     "<b>Пакет активовано</b>\n\n"
                     f"<b>Пакет:</b> {result.get('package_title', 'платний пакет')}\n"
                     f"<b>Додано перевірок:</b> {result['checks_added']}\n\n"
-                    "<b>Акція до запуску AntiFakeUA</b>\n"
-                    "Дякуємо, що допомагаєш протестувати сервіс перед офіційним запуском. "
-                    "У межах тестування LiqPay працює в sandbox-режимі, тому кошти з картки не списуються, а пакет уже активовано для перевірки роботи бота.\n\n"
+                    "<b>Тестовий запуск AntiFakeUA</b>\n"
+                    "Оплату успішно підтверджено, але зараз LiqPay працює в тестовому режимі. "
+                    "Кошти з картки не списуються — пакет уже активовано для перевірки роботи сервісу."
+                    f"{support_line}\n\n"
                     "Поточний баланс можна переглянути командою <code>/limits</code>."
                 )
             else:

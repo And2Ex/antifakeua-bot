@@ -257,8 +257,8 @@ async def liqpay_callback(request: Request):
         try:
             if LIQPAY_SANDBOX:
                 support_line = (
-                    f'\n\nЯкщо сервіс корисний, можеш підтримати розвиток бота донатом:\n'
-                    f'<a href="{SUPPORT_JAR_URL}">Підтримати AntiFakeUA</a>'
+                    f'\n\nПідтримати проєкт можна добровільно:\n'
+                    f'<a href="{SUPPORT_JAR_URL}">Monobank Банка AntiFakeUA</a>'
                     if SUPPORT_JAR_URL
                     else ""
                 )
@@ -267,9 +267,7 @@ async def liqpay_callback(request: Request):
                     "<b>Пакет активовано</b>\n\n"
                     f"<b>Пакет:</b> {result.get('package_title', 'платний пакет')}\n"
                     f"<b>Додано перевірок:</b> {result['checks_added']}\n\n"
-                    "<b>Тестовий запуск AntiFakeUA</b>\n"
-                    "Оплату успішно підтверджено, але зараз LiqPay працює в тестовому режимі. "
-                    "Кошти з картки не списуються — пакет уже активовано для перевірки роботи сервісу."
+                    "Зараз оплата працює в тестовому форматі, тому кошти з картки не списуються."
                     f"{support_line}\n\n"
                     "Поточний баланс можна переглянути командою <code>/limits</code>."
                 )

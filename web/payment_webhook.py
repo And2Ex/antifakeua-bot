@@ -10,7 +10,7 @@ from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from config import BASE_DIR, BASE_WEBHOOK_URL, BOT_TOKEN, GITHUB_URL, METHODOLOGY_URL, PAYMENT_RESULT_URL
+from config import BASE_DIR, BASE_WEBHOOK_URL, BOT_TOKEN, GITHUB_URL, LIQPAY_SANDBOX, METHODOLOGY_URL, PAYMENT_RESULT_URL
 from database.db import process_successful_payment
 from services.payments import decode_callback_data, verify_callback_signature
 
@@ -117,7 +117,7 @@ def render_homepage() -> str:
       <li>Basic — пакет перевірок для особистого використання;</li>
       <li>Pro — більший пакет для активнішого користування.</li>
     </ul>
-    <p>Актуальні ціни, акції та кількість перевірок показуються безпосередньо в Telegram-боті перед оплатою.</p>
+    <p>Актуальні ціни та кількість перевірок показуються безпосередньо в Telegram-боті перед активацією пакета.</p>
   </section>
 
   <section class="card">
@@ -254,14 +254,27 @@ async def liqpay_callback(request: Request):
         bot = Bot(token=BOT_TOKEN)
 
         try:
-            await bot.send_message(
-                chat_id=result["user_id"],
-                text=(
-                    "✅ <b>Оплату отримано</b>\n\n"
+            if LIQPAY_SANDBOX:
+                success_text = (
+                    "<b>Пакет активовано</b>\n\n"
                     f"<b>Пакет:</b> {result.get('package_title', 'платний пакет')}\n"
                     f"<b>Додано перевірок:</b> {result['checks_added']}\n\n"
-                    "Перевірити баланс можна командою /limits."
-                ),
+                    "<b>Акція до запуску AntiFakeUA</b>\n"
+                    "Дякуємо, що допомагаєш протестувати сервіс перед офіційним запуском. "
+                    "У межах тестування LiqPay працює в sandbox-режимі, тому кошти з картки не списуються, а пакет уже активовано для перевірки роботи бота.\n\n"
+                    "Поточний баланс можна переглянути командою <code>/limits</code>."
+                )
+            else:
+                success_text = (
+                    "<b>Оплату отримано</b>\n\n"
+                    f"<b>Пакет:</b> {result.get('package_title', 'платний пакет')}\n"
+                    f"<b>Додано перевірок:</b> {result['checks_added']}\n\n"
+                    "Поточний баланс можна переглянути командою <code>/limits</code>."
+                )
+
+            await bot.send_message(
+                chat_id=result["user_id"],
+                text=success_text,
                 parse_mode="HTML",
             )
         finally:

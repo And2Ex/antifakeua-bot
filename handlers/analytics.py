@@ -1,13 +1,9 @@
-"""Optional analytics commands for aiogram 3.x.
-
-Add this router in setup_bot(dp):
-    from handlers import analytics
-    dp.include_router(analytics.router)
-"""
+"""Optional analytics commands for aiogram 3.x."""
 
 from __future__ import annotations
 
 import sqlite3
+from html import escape
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -22,11 +18,25 @@ router = Router()
 @router.message(Command("source"))
 async def source_command(message: Message) -> None:
     args = (message.text or "").split(maxsplit=1)
+
     if len(args) < 2:
-        await message.answer("Надішли так: /source pravda.com.ua або /source @channel")
+        await message.answer(
+            "<b>Як перевірити джерело</b>\n\n"
+            "Надішли команду з доменом або каналом:\n"
+            "<code>/source pravda.com.ua</code>\n"
+            "<code>/source @channel</code>",
+            parse_mode="HTML",
+        )
         return
 
-    query = args[1].strip().lower().removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    query = (
+        args[1]
+        .strip()
+        .lower()
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .removeprefix("www.")
+    )
 
     with sqlite3.connect(DATABASE_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -43,7 +53,11 @@ async def source_command(message: Message) -> None:
         ).fetchone()
 
     if not row:
-        await message.answer("Поки що цього джерела немає в базі.")
+        await message.answer(
+            "<b>Джерела поки немає в базі</b>\n\n"
+            "Воно зʼявиться після того, як трапиться в одній із перевірок.",
+            parse_mode="HTML",
+        )
         return
 
     name = row["name"]
@@ -57,15 +71,16 @@ async def source_command(message: Message) -> None:
     score = row["reliability_score"] or 50
 
     text = (
-        "📊 Репутація джерела\n\n"
-        f"Джерело: {name}\n"
-        f"Тип: {source_type}\n"
-        f"Домен: {domain or '—'}\n"
-        f"Індекс надійності: {score}/100\n\n"
-        f"✅ Правда: {true_count}\n"
-        f"❌ Фейки: {fake_count}\n"
-        f"⚠️ Маніпуляції: {manipulation_count}\n"
-        f"🕒 Старий контент як новий: {stale_count}\n"
-        f"❔ Непідтверджено: {unverified_count}"
+        "<b>Репутація джерела</b>\n\n"
+        f"<b>Джерело:</b> {escape(str(name))}\n"
+        f"<b>Тип:</b> {escape(str(source_type))}\n"
+        f"<b>Домен:</b> {escape(str(domain or '—'))}\n"
+        f"<b>Індекс надійності:</b> {score}/100\n\n"
+        f"<b>Правда:</b> {true_count}\n"
+        f"<b>Фейки:</b> {fake_count}\n"
+        f"<b>Маніпуляції:</b> {manipulation_count}\n"
+        f"<b>Старий контент як новий:</b> {stale_count}\n"
+        f"<b>Непідтверджено:</b> {unverified_count}"
     )
-    await message.answer(text)
+
+    await message.answer(text, parse_mode="HTML")

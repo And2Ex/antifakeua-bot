@@ -315,7 +315,9 @@ async def process_text_check(
 
     if not is_meaningful_text(text):
         await requester_message.answer(
-            "Надішли текст новини або твердження для перевірки."
+            "<b>Немає що перевіряти</b>\n\n"
+            "Надішли текст новини, заяву або конкретне твердження.",
+            parse_mode="HTML",
         )
         return
 
@@ -387,7 +389,7 @@ async def process_text_check(
     limit_allowed, limit_message = check_and_use_text_limit(user.id)
 
     if not limit_allowed:
-        await requester_message.answer(limit_message)
+        await requester_message.answer(limit_message, parse_mode="HTML")
         return
 
     status_message = await requester_message.answer(
@@ -469,9 +471,11 @@ async def check_command_handler(message: Message):
         return
 
     await message.answer(
-        "Щоб перевірити текст, надішли:\n\n"
-        "/check текст твердження\n\n"
-        "Або відповідай командою /check на повідомлення з текстом."
+        "<b>Як користуватись командою /check</b>\n\n"
+        "У групі відповідай <code>/check</code> на повідомлення, яке треба перевірити.\n\n"
+        "Або напиши так:\n"
+        "<code>/check мобілізацію продовжено</code>",
+        parse_mode="HTML",
     )
 
 

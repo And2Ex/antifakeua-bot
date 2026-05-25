@@ -9,11 +9,11 @@ from aiogram.types import (
 
 from database.db import add_user, create_payment
 from services.payments import (
+    PAYMENT_PACKAGES,
     create_checkout_url,
     format_package_price,
     get_package,
     get_packages_text,
-    PAYMENT_PACKAGES,
 )
 
 
@@ -26,12 +26,26 @@ def build_buy_keyboard() -> InlineKeyboardMarkup:
     for package_id, package in PAYMENT_PACKAGES.items():
         buttons.append([
             InlineKeyboardButton(
-                text=f"💳 {package['title']} — {package['checks']} перевірок • {package['amount']:.0f} грн",
+                text=f"{package['title']} — {package['checks']} перевірок • {package['amount']:.0f} грн",
                 callback_data=f"buy:{package_id}",
             )
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_payment_text(package: dict) -> str:
+    lines = [
+        "<b>Пакет готовий до активації</b>",
+        "",
+        f"<b>Пакет:</b> {package['title']}",
+        f"<b>Перевірок:</b> {package['checks']}",
+        f"<b>Ціна:</b> {format_package_price(package)}",
+        "",
+        "Натисни кнопку нижче, щоб перейти до підтвердження через LiqPay. Після успішного підтвердження перевірки автоматично додадуться до твого балансу.",
+    ]
+
+    return "\n".join(lines)
 
 
 @router.message(Command("buy"))
@@ -100,8 +114,10 @@ async def buy_package_callback(callback: CallbackQuery):
         payment_url = create_checkout_url(order_id, package)
     except ValueError as error:
         await callback.message.answer(
-            "Оплата ще не налаштована.\n\n"
-            f"Технічна причина: {error}"
+            "<b>Оплата тимчасово недоступна</b>\n\n"
+            "Не вдалося створити платіжне посилання. Спробуй пізніше або напиши через розділ <b>Відгук</b>.\n\n"
+            f"<i>Технічна причина: {error}</i>",
+            parse_mode="HTML",
         )
         await callback.answer()
         return
@@ -110,7 +126,7 @@ async def buy_package_callback(callback: CallbackQuery):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💳 Оплатити через LiqPay",
+                    text="Оплатити через LiqPay",
                     url=payment_url,
                 )
             ]
@@ -118,11 +134,7 @@ async def buy_package_callback(callback: CallbackQuery):
     )
 
     await callback.message.answer(
-        "✅ <b>Платіж створено</b>\n\n"
-        f"<b>Пакет:</b> {package['title']}\n"
-        f"<b>Перевірок:</b> {package['checks']}\n"
-        f"<b>Акційна ціна:</b> {format_package_price(package)}\n\n"
-        "Після успішної оплати перевірки автоматично додадуться до платного балансу.",
+        build_payment_text(package),
         parse_mode="HTML",
         reply_markup=keyboard,
     )

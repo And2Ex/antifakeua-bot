@@ -12,4 +12,4 @@ router = Router()
 async def limits_handler(message: Message):
     limit_info = get_limit_info(message.from_user.id)
 
-    await message.answer(limit_info)
+    await message.answer(limit_info, parse_mode="HTML")

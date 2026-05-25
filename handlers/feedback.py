@@ -37,7 +37,7 @@ async def notify_admins_about_feedback(message: Message, feedback_text: str) -> 
     user_label = f"@{username}" if username else "без username"
 
     text = (
-        "✉️ <b>Новий відгук</b>\n\n"
+        "<b>Новий відгук</b>\n\n"
         f"<b>Користувач:</b> {escape(user_label)}\n"
         f"<b>User ID:</b> <code>{message.from_user.id}</code>\n\n"
         f"{escape(feedback_text)}"
@@ -55,8 +55,10 @@ async def feedback_start_callback(callback: CallbackQuery):
     PENDING_FEEDBACK_USERS.add(callback.from_user.id)
 
     await callback.message.answer(
-        "✉️ Напиши відгук одним повідомленням.\n\n"
-        "Щоб скасувати, напиши /cancel.",
+        "<b>Напиши відгук</b>\n\n"
+        "Надішли одним повідомленням проблему, пропозицію або приклад неточної відповіді.\n\n"
+        "Щоб скасувати, напиши <code>/cancel</code>.",
+        parse_mode="HTML",
         reply_markup=BACK_TO_MENU_KEYBOARD,
     )
     await callback.answer()
@@ -68,7 +70,7 @@ async def cancel_feedback_handler(message: Message):
         return
 
     PENDING_FEEDBACK_USERS.discard(message.from_user.id)
-    await message.answer("Надсилання відгуку скасовано.")
+    await message.answer("<b>Відгук скасовано</b>", parse_mode="HTML")
 
 
 @router.message(Command("feedback"))
@@ -78,14 +80,15 @@ async def feedback_handler(message: Message):
     if not feedback_text:
         PENDING_FEEDBACK_USERS.add(message.from_user.id)
         await message.answer(
-            "✉️ Напиши відгук наступним повідомленням.\n\n"
-            "Щоб скасувати, напиши /cancel."
+            "<b>Напиши відгук</b>\n\n"
+            "Надішли його наступним повідомленням. Щоб скасувати, напиши <code>/cancel</code>.",
+            parse_mode="HTML",
         )
         return
 
     save_feedback(message, feedback_text)
     await notify_admins_about_feedback(message, feedback_text)
-    await message.answer("Дякую. Відгук збережено.")
+    await message.answer("<b>Дякую. Відгук збережено.</b>", parse_mode="HTML")
 
 
 @router.message(is_waiting_for_feedback, F.text)
@@ -94,12 +97,13 @@ async def feedback_text_handler(message: Message):
     text = (message.text or "").strip()
 
     if not text:
-        await message.answer("Напиши текст відгуку одним повідомленням.")
+        await message.answer("<b>Напиши текст відгуку одним повідомленням.</b>", parse_mode="HTML")
         return
 
     if text.startswith("/"):
         await message.answer(
-            "Це схоже на команду. Напиши сам текст відгуку або /cancel, щоб скасувати."
+            "Це схоже на команду. Напиши сам текст відгуку або <code>/cancel</code>, щоб скасувати.",
+            parse_mode="HTML",
         )
         return
 
@@ -107,4 +111,4 @@ async def feedback_text_handler(message: Message):
     save_feedback(message, text)
     await notify_admins_about_feedback(message, text)
 
-    await message.answer("Дякую. Відгук збережено.")
+    await message.answer("<b>Дякую. Відгук збережено.</b>", parse_mode="HTML")

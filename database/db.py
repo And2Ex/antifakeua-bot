@@ -295,7 +295,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
 
     if user is None:
         connection.close()
-        return False, "Користувача не знайдено. Натисни /start."
+        return False, "<b>Користувача не знайдено</b>\n\nНатисни <code>/start</code>, щоб створити профіль у боті."
 
     free_limit = user["free_limit"]
     free_used = user["free_used"]
@@ -319,7 +319,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         remaining_free = free_limit - (free_used + 1)
 
         if paid_balance == 0 and remaining_free <= 3:
-            return True, f"ℹ️ Залишилось безкоштовних перевірок: {remaining_free}. /menu — купити додаткові."
+            return True, f"<b>Залишилось безкоштовних перевірок:</b> {remaining_free}\nДодатковий пакет можна активувати командою <code>/buy</code>."
 
         return True, ""
 
@@ -341,7 +341,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         remaining_paid = paid_balance - 1
 
         if remaining_paid <= 3:
-            return True, f"ℹ️ Залишилось платних перевірок: {remaining_paid}. /menu — поповнити баланс."
+            return True, f"<b>Залишилось платних перевірок:</b> {remaining_paid}\nПоповнити баланс можна командою <code>/buy</code>."
 
         return True, ""
 
@@ -349,10 +349,10 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
 
     return (
         False,
-        "Ліміт перевірок вичерпано.\n\n"
-        f"Безкоштовні перевірки: {free_used}/{free_limit}\n"
-        "Платний баланс: 0\n\n"
-        "Щоб продовжити, відкрий /menu і натисни “Купити перевірки”."
+        "<b>Ліміт перевірок вичерпано</b>\n\n"
+        f"<b>Безкоштовні перевірки:</b> {free_used}/{free_limit}\n"
+        "<b>Платний баланс:</b> 0\n\n"
+        "Щоб продовжити перевірку, активуй додатковий пакет командою <code>/buy</code>."
     )
 
 

@@ -125,6 +125,50 @@ def add_missing_columns(cursor, table_name: str, existing_columns: set[str], new
             )
 
 
+
+def get_app_setting(key: str, default: str | None = None) -> str | None:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "SELECT value FROM app_settings WHERE key = ?",
+        (key,)
+    )
+    row = cursor.fetchone()
+    connection.close()
+
+    if row is None:
+        return default
+
+    return row["value"]
+
+
+def set_app_setting(key: str, value: str) -> None:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (key, value)
+    )
+
+    connection.commit()
+    connection.close()
+
+
+def is_admin_notifications_enabled() -> bool:
+    return get_app_setting("admin_notifications_enabled", "1") == "1"
+
+
+def set_admin_notifications_enabled(enabled: bool) -> None:
+    set_app_setting("admin_notifications_enabled", "1" if enabled else "0")
+
 def current_month() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
 

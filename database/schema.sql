@@ -172,3 +172,10 @@ CREATE TABLE IF NOT EXISTS watch_sources (
     FOREIGN KEY (source_id) REFERENCES sources(id)
 );
 
+
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -5,7 +5,7 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from config import ADMIN_IDS, GITHUB_URL, METHODOLOGY_URL
-from database.db import add_user, get_request_by_public_id
+from database.db import add_user, get_request_by_public_id, get_user
 from keyboards.menu import (
     BACK_TO_MENU_KEYBOARD,
     FEEDBACK_MENU_KEYBOARD,
@@ -15,6 +15,7 @@ from keyboards.menu import (
 from services.limiter import get_limit_info
 from services.public_check import format_public_check
 from services.gpt import FACT_CHECK_PROMPT
+from services.admin_notifications import notify_new_user
 from services.utils import truncate_text
 
 
@@ -122,11 +123,21 @@ async def edit_or_send_menu(
 async def start_handler(message: Message, command: CommandObject):
     user = message.from_user
 
+    is_new_user = get_user(user.id) is None
+
     add_user(
         user_id=user.id,
         username=user.username,
         first_name=user.first_name,
     )
+
+    if is_new_user:
+        await notify_new_user(
+            message.bot,
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+        )
 
     if command.args and command.args.startswith("check_"):
         request = get_request_by_public_id(command.args)

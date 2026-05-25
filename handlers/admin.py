@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from config import ADMIN_IDS
 from database.db import (
     admin_add_paid_balance,
+    is_admin_notifications_enabled,
     get_basic_stats,
     get_chat_source_stats,
     get_domain_stats,
@@ -17,9 +18,14 @@ from database.db import (
     get_user,
     reset_all_limits,
     reset_user_limits,
+    set_admin_notifications_enabled,
     set_user_text_limit,
 )
-from keyboards.admin import ADMIN_BACK_KEYBOARD, get_admin_keyboard
+from keyboards.admin import (
+    ADMIN_BACK_KEYBOARD,
+    build_admin_notifications_keyboard,
+    get_admin_keyboard,
+)
 
 
 router = Router()
@@ -216,6 +222,24 @@ async def send_recent_feedback(message: Message) -> None:
     )
 
 
+async def send_notifications_settings(message: Message) -> None:
+    enabled = is_admin_notifications_enabled()
+    status = "увімкнені" if enabled else "вимкнені"
+
+    await message.answer(
+        "🔔 <b>Адмін-сповіщення</b>\n\n"
+        f"Поточний стан: <b>{status}</b>.\n\n"
+        "Коли сповіщення увімкнені, бот надсилатиме тобі повідомлення про:\n"
+        "• нових користувачів;\n"
+        "• додавання бота в групи;\n"
+        "• нові перевірки;\n"
+        "• активацію пакетів перевірок.\n\n"
+        "Якщо користувачів стане багато, їх можна вимкнути цією кнопкою.",
+        parse_mode="HTML",
+        reply_markup=build_admin_notifications_keyboard(enabled),
+    )
+
+
 @router.message(Command("admin"))
 async def admin_handler(message: Message):
     if not await require_admin_message(message):
@@ -297,6 +321,27 @@ async def recent_feedback_callback(callback: CallbackQuery):
 
     await callback.answer()
     await send_recent_feedback(callback.message)
+
+
+@router.callback_query(F.data == "admin:notifications")
+async def admin_notifications_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    await callback.answer()
+    await send_notifications_settings(callback.message)
+
+
+@router.callback_query(F.data == "admin:notifications_toggle")
+async def admin_notifications_toggle_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    current = is_admin_notifications_enabled()
+    set_admin_notifications_enabled(not current)
+
+    await callback.answer("Сповіщення оновлено")
+    await send_notifications_settings(callback.message)
 
 
 @router.callback_query(F.data == "admin:review")

@@ -7,7 +7,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import LinkPreviewOptions, Message, ReplyParameters
 
-from database.db import add_request, add_user, get_connection, remember_content
+from database.db import add_request, add_user, get_connection, get_user, remember_content
+from services.admin_notifications import notify_check_completed, notify_new_user
 from services.cache import get_cached_response, save_cached_response
 from services.formatter import (
     extract_verdict_from_result,
@@ -321,11 +322,21 @@ async def process_text_check(
         )
         return
 
+    is_new_user = get_user(user.id) is None
+
     add_user(
         user_id=user.id,
         username=user.username,
         first_name=user.first_name
     )
+
+    if is_new_user:
+        await notify_new_user(
+            requester_message.bot,
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+        )
 
     source_type, source_title, source_link = get_source_info(source_message)
 
@@ -383,6 +394,17 @@ async def process_text_check(
             source_link=source_link,
             limit_message="🔁 Цю новину вже перевіряли раніше. Ліміт не списано.",
             reply_parameters=reply_parameters,
+        )
+
+        await notify_check_completed(
+            requester_message.bot,
+            user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            verdict=cached_result["verdict"],
+            source_title=source_title,
+            from_cache=True,
+            text=text,
         )
         return
 
@@ -445,6 +467,17 @@ async def process_text_check(
         source_link=source_link,
         limit_message=limit_message,
         reply_parameters=reply_parameters,
+    )
+
+    await notify_check_completed(
+        requester_message.bot,
+        user_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        verdict=verdict,
+        source_title=source_title,
+        from_cache=False,
+        text=text,
     )
 
 

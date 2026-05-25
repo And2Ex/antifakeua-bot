@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 
 from config import BASE_DIR, BASE_WEBHOOK_URL, BOT_TOKEN, GITHUB_URL, LIQPAY_SANDBOX, METHODOLOGY_URL, PAYMENT_RESULT_URL
 from database.db import process_successful_payment
+from services.admin_notifications import notify_payment_credited
 from services.payments import decode_callback_data, verify_callback_signature
 
 
@@ -276,6 +277,14 @@ async def liqpay_callback(request: Request):
                 chat_id=result["user_id"],
                 text=success_text,
                 parse_mode="HTML",
+            )
+
+            await notify_payment_credited(
+                bot,
+                user_id=result["user_id"],
+                package_title=result.get("package_title", "платний пакет"),
+                checks_added=result["checks_added"],
+                sandbox=LIQPAY_SANDBOX,
             )
         finally:
             await bot.session.close()

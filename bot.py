@@ -3,6 +3,7 @@ from aiogram import Bot, Dispatcher
 from config import BOT_TOKEN
 from handlers import (
     about,
+    admin_events,
     admin,
     analytics,
     buy,
@@ -22,6 +23,7 @@ dp = Dispatcher()
 
 
 def setup_routers():
+    dp.include_router(admin_events.router)
     dp.include_router(start.router)
     dp.include_router(help.router)
     dp.include_router(limits.router)

@@ -67,23 +67,23 @@ async def buy_handler(message: Message):
 
 @router.callback_query(F.data == "buy_menu")
 async def buy_menu_callback(callback: CallbackQuery):
+    await callback.answer()
     await callback.message.answer(
         get_packages_text(),
         parse_mode="HTML",
         reply_markup=build_buy_keyboard(),
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("buy:"))
 async def buy_package_callback(callback: CallbackQuery):
     if callback.data == "buy:menu":
+        await callback.answer()
         await callback.message.answer(
             get_packages_text(),
             parse_mode="HTML",
             reply_markup=build_buy_keyboard(),
         )
-        await callback.answer()
         return
 
     package_id = callback.data.split(":", 1)[1]
@@ -93,6 +93,7 @@ async def buy_package_callback(callback: CallbackQuery):
         await callback.answer("Пакет не знайдено.", show_alert=True)
         return
 
+    await callback.answer("Готую платіж…")
     user = callback.from_user
 
     add_user(
@@ -119,7 +120,6 @@ async def buy_package_callback(callback: CallbackQuery):
             f"<i>Технічна причина: {error}</i>",
             parse_mode="HTML",
         )
-        await callback.answer()
         return
 
     keyboard = InlineKeyboardMarkup(
@@ -138,5 +138,3 @@ async def buy_package_callback(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=keyboard,
     )
-
-    await callback.answer()

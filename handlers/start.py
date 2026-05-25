@@ -156,47 +156,48 @@ async def menu_handler(message: Message):
 
 @router.callback_query(F.data == "menu:main")
 async def menu_main_callback(callback: CallbackQuery):
+    await callback.answer()
     await callback.message.edit_text(
         WELCOME_TEXT,
         parse_mode="HTML",
         reply_markup=get_main_menu_keyboard(is_admin=callback.from_user.id in ADMIN_IDS),
         link_preview_options=NO_LINK_PREVIEW,
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.in_({"menu:how", "menu:about", "menu:trust"}))
 async def menu_about_callback(callback: CallbackQuery):
-    await edit_or_send_menu(callback, ABOUT_TEXT)
     await callback.answer()
+    await edit_or_send_menu(callback, ABOUT_TEXT)
 
 
 @router.callback_query(F.data == "menu:limits")
 async def menu_limits_callback(callback: CallbackQuery):
-    await edit_or_send_menu(callback, get_limit_info(callback.from_user.id))
     await callback.answer()
+    await edit_or_send_menu(callback, get_limit_info(callback.from_user.id))
 
 
 @router.callback_query(F.data == "menu:source")
 async def menu_source_callback(callback: CallbackQuery):
-    await edit_or_send_menu(callback, SOURCE_HELP_TEXT)
     await callback.answer()
+    await edit_or_send_menu(callback, SOURCE_HELP_TEXT)
 
 
 @router.callback_query(F.data == "menu:feedback")
 async def menu_feedback_callback(callback: CallbackQuery):
-    await edit_or_send_menu(callback, FEEDBACK_TEXT, reply_markup=FEEDBACK_MENU_KEYBOARD)
     await callback.answer()
+    await edit_or_send_menu(callback, FEEDBACK_TEXT, reply_markup=FEEDBACK_MENU_KEYBOARD)
 
 
 @router.callback_query(F.data == "menu:transparency")
 async def menu_transparency_callback(callback: CallbackQuery):
-    await edit_or_send_menu(callback, build_transparency_text(), reply_markup=TRANSPARENCY_KEYBOARD)
     await callback.answer()
+    await edit_or_send_menu(callback, build_transparency_text(), reply_markup=TRANSPARENCY_KEYBOARD)
 
 
 @router.callback_query(F.data == "menu:prompt")
 async def menu_prompt_callback(callback: CallbackQuery):
+    await callback.answer()
     prompt_text = truncate_text(FACT_CHECK_PROMPT.strip(), 3500)
 
     await edit_or_send_menu(
@@ -205,4 +206,3 @@ async def menu_prompt_callback(callback: CallbackQuery):
         f"<pre>{escape(prompt_text)}</pre>",
         reply_markup=TRANSPARENCY_KEYBOARD,
     )
-    await callback.answer()

@@ -129,6 +129,7 @@ async def review_skip_callback(callback: CallbackQuery):
         await callback.answer("Недостатньо прав.", show_alert=True)
         return
 
+    await callback.answer("Пропускаю…")
     public_id = callback.data.split(":", 1)[1]
 
     update_publication_status(
@@ -142,7 +143,6 @@ async def review_skip_callback(callback: CallbackQuery):
     )
 
     await send_next_review(callback.message)
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("review_reject:"))
@@ -151,6 +151,7 @@ async def review_reject_callback(callback: CallbackQuery):
         await callback.answer("Недостатньо прав.", show_alert=True)
         return
 
+    await callback.answer("Відхиляю…")
     public_id = callback.data.split(":", 1)[1]
 
     update_publication_status(
@@ -164,7 +165,6 @@ async def review_reject_callback(callback: CallbackQuery):
     )
 
     await send_next_review(callback.message)
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("review_publish:"))
@@ -180,6 +180,7 @@ async def review_publish_callback(callback: CallbackQuery):
         await callback.answer("Перевірку не знайдено.", show_alert=True)
         return
 
+    await callback.answer("Публікую…")
     public_link = await make_public_link(callback, public_id)
 
     try:
@@ -189,7 +190,6 @@ async def review_publish_callback(callback: CallbackQuery):
             public_link=public_link
         )
     except Exception as error:
-        await callback.answer("Не вдалося опублікувати.", show_alert=True)
         await callback.message.answer(f"Помилка публікації: {error}")
         return
 
@@ -205,4 +205,3 @@ async def review_publish_callback(callback: CallbackQuery):
     )
 
     await send_next_review(callback.message)
-    await callback.answer("Опубліковано.")

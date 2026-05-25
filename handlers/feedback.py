@@ -52,6 +52,7 @@ async def notify_admins_about_feedback(message: Message, feedback_text: str) -> 
 
 @router.callback_query(F.data == "feedback:start")
 async def feedback_start_callback(callback: CallbackQuery):
+    await callback.answer()
     PENDING_FEEDBACK_USERS.add(callback.from_user.id)
 
     await callback.message.answer(
@@ -61,7 +62,6 @@ async def feedback_start_callback(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=BACK_TO_MENU_KEYBOARD,
     )
-    await callback.answer()
 
 
 @router.message(Command("cancel"))

@@ -229,12 +229,12 @@ async def admin_menu_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
+    await callback.answer()
     await callback.message.answer(
         "🛠 <b>Адмін-панель</b>",
         parse_mode="HTML",
         reply_markup=get_admin_keyboard(),
     )
-    await callback.answer()
 
 
 @router.message(Command("stats"))
@@ -251,8 +251,8 @@ async def stats_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
-    await send_stats(callback.message)
     await callback.answer()
+    await send_stats(callback.message)
 
 
 @router.message(Command("paymentstats"))
@@ -268,8 +268,8 @@ async def payment_stats_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
-    await send_payment_stats(callback.message)
     await callback.answer()
+    await send_payment_stats(callback.message)
 
 
 @router.message(Command("sourcestats"))
@@ -286,8 +286,8 @@ async def source_stats_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
-    await send_source_stats(callback.message)
     await callback.answer()
+    await send_source_stats(callback.message)
 
 
 @router.callback_query(F.data == "admin:feedback")
@@ -295,8 +295,8 @@ async def recent_feedback_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
-    await send_recent_feedback(callback.message)
     await callback.answer()
+    await send_recent_feedback(callback.message)
 
 
 @router.callback_query(F.data == "admin:review")
@@ -304,10 +304,10 @@ async def review_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
+    await callback.answer()
     from handlers.review import send_next_review
 
     await send_next_review(callback.message)
-    await callback.answer()
 
 
 @router.callback_query(F.data == "admin:reset_limits")
@@ -315,12 +315,12 @@ async def reset_limits_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
+    await callback.answer("Скидаю…")
     reset_all_limits()
     await callback.message.answer(
         "♻️ Безкоштовні ліміти всіх користувачів скинуто. Платний баланс не змінено.",
         reply_markup=ADMIN_BACK_KEYBOARD,
     )
-    await callback.answer("Скинуто.")
 
 
 @router.message(F.text == "♻️ Скинути ліміти")
@@ -403,8 +403,8 @@ async def recent_payments_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
-    await send_recent_payments(callback.message)
     await callback.answer()
+    await send_recent_payments(callback.message)
 
 
 @router.message(Command("paymentdebug"))
@@ -495,6 +495,7 @@ async def admin_commands_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
+    await callback.answer()
     await callback.message.answer(
         "🧰 <b>Технічні адмін-команди</b>\n\n"
         "Вони не показуються в меню Telegram, але працюють вручну:\n\n"
@@ -507,4 +508,3 @@ async def admin_commands_callback(callback: CallbackQuery):
         parse_mode="HTML",
         reply_markup=ADMIN_BACK_KEYBOARD,
     )
-    await callback.answer()

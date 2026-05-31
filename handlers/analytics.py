@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import sqlite3
 from html import escape
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from database.db import DATABASE_PATH
+from database.db import get_connection
 
 
 router = Router()
@@ -38,14 +37,13 @@ async def source_command(message: Message) -> None:
         .removeprefix("www.")
     )
 
-    with sqlite3.connect(DATABASE_PATH) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
+    with get_connection() as connection:
+        row = connection.execute(
             """
             SELECT name, type, domain, true_count, fake_count, manipulation_count,
                    unverified_count, stale_count, reliability_score
             FROM sources
-            WHERE lower(name) LIKE ? OR lower(domain) LIKE ?
+            WHERE lower(name) LIKE %s OR lower(domain) LIKE %s
             ORDER BY updated_at DESC
             LIMIT 1
             """,
@@ -71,16 +69,17 @@ async def source_command(message: Message) -> None:
     score = row["reliability_score"] or 50
 
     text = (
-        "<b>Репутація джерела</b>\n\n"
-        f"<b>Джерело:</b> {escape(str(name))}\n"
-        f"<b>Тип:</b> {escape(str(source_type))}\n"
-        f"<b>Домен:</b> {escape(str(domain or '—'))}\n"
-        f"<b>Індекс надійності:</b> {score}/100\n\n"
-        f"<b>Правда:</b> {true_count}\n"
-        f"<b>Фейки:</b> {fake_count}\n"
-        f"<b>Маніпуляції:</b> {manipulation_count}\n"
-        f"<b>Старий контент як новий:</b> {stale_count}\n"
-        f"<b>Непідтверджено:</b> {unverified_count}"
+        "🌐 <b>Статистика джерела</b>\n\n"
+        f"<b>Назва:</b> {escape(name)}\n"
+        f"<b>Тип:</b> {escape(source_type)}\n"
+        f"<b>Домен:</b> {escape(domain or 'немає')}\n\n"
+        f"✅ Правда: {true_count}\n"
+        f"❌ Фейк: {fake_count}\n"
+        f"⚠️ Маніпуляція: {manipulation_count}\n"
+        f"ℹ️ Недостатньо даних: {unverified_count}\n"
+        f"🕒 Старий контент: {stale_count}\n\n"
+        f"<b>Умовний бал:</b> {float(score):.2f}/100\n\n"
+        "Бал є лише внутрішньою статистикою появ джерела в перевірках, а не остаточною оцінкою медіа."
     )
 
     await message.answer(text, parse_mode="HTML")

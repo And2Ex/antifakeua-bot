@@ -1,10 +1,12 @@
 import json
 import secrets
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import DATABASE_PATH, FREE_TEXT_LIMIT
+import psycopg
+from psycopg.rows import dict_row
+
+from config import FREE_TEXT_LIMIT, require_database_url
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,115 +17,35 @@ SUCCESS_PAYMENT_STATUSES = {"success", "sandbox"}
 
 
 def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-
-    return connection
-
-
-def init_db():
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as file:
-        sql_script = file.read()
-
-    cursor.executescript(sql_script)
-    ensure_users_columns(cursor)
-    ensure_requests_columns(cursor)
-    ensure_feedback_columns(cursor)
-    ensure_payments_columns(cursor)
-
-    connection.commit()
-    connection.close()
+    return psycopg.connect(
+        require_database_url(),
+        row_factory=dict_row,
+        connect_timeout=15,
+    )
 
 
-def ensure_users_columns(cursor):
-    cursor.execute("PRAGMA table_info(users)")
-    columns = {row["name"] for row in cursor.fetchall()}
+def init_db() -> None:
+    sql_script = SCHEMA_PATH.read_text(encoding="utf-8")
 
-    new_columns = {
-        "username": "TEXT",
-        "first_name": "TEXT",
-        "plan": "TEXT NOT NULL DEFAULT 'free'",
-        "texts_limit": f"INTEGER NOT NULL DEFAULT {FREE_TEXT_LIMIT}",
-        "texts_used": "INTEGER NOT NULL DEFAULT 0",
-        "free_limit": f"INTEGER NOT NULL DEFAULT {FREE_TEXT_LIMIT}",
-        "free_used": "INTEGER NOT NULL DEFAULT 0",
-        "paid_balance": "INTEGER NOT NULL DEFAULT 0",
-        "last_free_reset_month": "TEXT",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    }
+    statements = [
+        statement.strip()
+        for statement in sql_script.split(";")
+        if statement.strip()
+    ]
 
-    add_missing_columns(cursor, "users", columns, new_columns)
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
 
 
-def ensure_requests_columns(cursor):
-    cursor.execute("PRAGMA table_info(requests)")
-    columns = {row["name"] for row in cursor.fetchall()}
-
-    new_columns = {
-        "public_id": "TEXT",
-        "response_text": "TEXT",
-        "source_type": "TEXT",
-        "source_title": "TEXT",
-        "source_link": "TEXT",
-        "detected_links": "TEXT",
-        "detected_domains": "TEXT",
-        "verdict": "TEXT",
-        "from_cache": "INTEGER NOT NULL DEFAULT 0",
-        "publication_status": "TEXT NOT NULL DEFAULT 'pending'",
-        "published_message_id": "INTEGER",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    }
-
-    add_missing_columns(cursor, "requests", columns, new_columns)
-
-
-def ensure_feedback_columns(cursor):
-    cursor.execute("PRAGMA table_info(feedback)")
-    columns = {row["name"] for row in cursor.fetchall()}
-
-    new_columns = {
-        "username": "TEXT",
-        "feedback_text": "TEXT",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    }
-
-    add_missing_columns(cursor, "feedback", columns, new_columns)
-
-
-def ensure_payments_columns(cursor):
-    cursor.execute("PRAGMA table_info(payments)")
-    columns = {row["name"] for row in cursor.fetchall()}
-
-    new_columns = {
-        "order_id": "TEXT",
-        "user_id": "INTEGER NOT NULL DEFAULT 0",
-        "package_id": "TEXT",
-        "package_title": "TEXT",
-        "checks_added": "INTEGER NOT NULL DEFAULT 0",
-        "amount": "REAL NOT NULL DEFAULT 0",
-        "currency": "TEXT NOT NULL DEFAULT 'UAH'",
-        "status": "TEXT NOT NULL DEFAULT 'created'",
-        "liqpay_order_id": "TEXT",
-        "raw_data": "TEXT",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "paid_at": "TIMESTAMP",
-    }
-
-    add_missing_columns(cursor, "payments", columns, new_columns)
-
-
-def add_missing_columns(cursor, table_name: str, existing_columns: set[str], new_columns: dict[str, str]):
-    for column_name, column_type in new_columns.items():
-        if column_name not in existing_columns:
+def check_database_connection() -> dict:
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
             cursor.execute(
-                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+                "SELECT current_database() AS database_name, version() AS version"
             )
-
+            return cursor.fetchone()
 
 
 def get_app_setting(key: str, default: str | None = None) -> str | None:
@@ -131,7 +53,7 @@ def get_app_setting(key: str, default: str | None = None) -> str | None:
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT value FROM app_settings WHERE key = ?",
+        "SELECT value FROM app_settings WHERE key = %s",
         (key,)
     )
     row = cursor.fetchone()
@@ -150,7 +72,7 @@ def set_app_setting(key: str, value: str) -> None:
     cursor.execute(
         """
         INSERT INTO app_settings (key, value, updated_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
         ON CONFLICT(key) DO UPDATE SET
             value = excluded.value,
             updated_at = CURRENT_TIMESTAMP
@@ -168,6 +90,7 @@ def is_admin_notifications_enabled() -> bool:
 
 def set_admin_notifications_enabled(enabled: bool) -> None:
     set_app_setting("admin_notifications_enabled", "1" if enabled else "0")
+
 
 def current_month() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m")
@@ -195,7 +118,7 @@ def remember_content(
         """
         SELECT *
         FROM content_history
-        WHERE content_hash = ?
+        WHERE content_hash = %s
         """,
         (content_hash,)
     )
@@ -212,7 +135,7 @@ def remember_content(
                 original_url,
                 times_seen
             )
-            VALUES (?, ?, ?, ?, ?, 1)
+            VALUES (%s, %s, %s, %s, %s, 1)
             """,
             (
                 content_hash,
@@ -238,9 +161,9 @@ def remember_content(
     cursor.execute(
         """
         UPDATE content_history
-        SET last_seen_at = ?,
-            times_seen = ?
-        WHERE content_hash = ?
+        SET last_seen_at = %s,
+            times_seen = %s
+        WHERE content_hash = %s
         """,
         (now, times_seen, content_hash)
     )
@@ -272,7 +195,7 @@ def add_user(user_id: int, username: str | None, first_name: str | None):
             free_limit,
             last_free_reset_month
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT(user_id) DO UPDATE SET
             username = excluded.username,
             first_name = excluded.first_name,
@@ -290,7 +213,7 @@ def get_user(user_id: int):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM users WHERE user_id = ?",
+        "SELECT * FROM users WHERE user_id = %s",
         (user_id,)
     )
 
@@ -307,7 +230,7 @@ def reset_monthly_free_limit_if_needed(user_id: int):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT last_free_reset_month FROM users WHERE user_id = ?",
+        "SELECT last_free_reset_month FROM users WHERE user_id = %s",
         (user_id,)
     )
     user = cursor.fetchone()
@@ -317,9 +240,9 @@ def reset_monthly_free_limit_if_needed(user_id: int):
             """
             UPDATE users
             SET free_used = 0,
-                last_free_reset_month = ?,
+                last_free_reset_month = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE user_id = %s
             """,
             (month, user_id)
         )
@@ -334,7 +257,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
     connection = get_connection()
     cursor = connection.cursor()
 
-    cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
     user = cursor.fetchone()
 
     if user is None:
@@ -352,7 +275,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
             SET free_used = free_used + 1,
                 texts_used = texts_used + 1,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE user_id = %s
             """,
             (user_id,)
         )
@@ -374,7 +297,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
             SET paid_balance = paid_balance - 1,
                 texts_used = texts_used + 1,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE user_id = %s
             """,
             (user_id,)
         )
@@ -407,10 +330,10 @@ def add_paid_balance(user_id: int, checks: int):
     cursor.execute(
         """
         UPDATE users
-        SET paid_balance = paid_balance + ?,
+        SET paid_balance = paid_balance + %s,
             plan = 'paid',
             updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ?
+        WHERE user_id = %s
         """,
         (checks, user_id)
     )
@@ -426,9 +349,9 @@ def update_user_usage(user_id: int, texts_used: int):
     cursor.execute(
         """
         UPDATE users
-        SET texts_used = ?,
+        SET texts_used = %s,
             updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ?
+        WHERE user_id = %s
         """,
         (texts_used, user_id)
     )
@@ -447,9 +370,9 @@ def reset_user_limits(user_id: int):
         SET texts_used = 0,
             free_used = 0,
             paid_balance = 0,
-            last_free_reset_month = ?,
+            last_free_reset_month = %s,
             updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ?
+        WHERE user_id = %s
         """,
         (current_month(), user_id)
     )
@@ -467,7 +390,7 @@ def reset_all_limits():
         UPDATE users
         SET texts_used = 0,
             free_used = 0,
-            last_free_reset_month = ?,
+            last_free_reset_month = %s,
             updated_at = CURRENT_TIMESTAMP
         """,
         (current_month(),)
@@ -484,10 +407,10 @@ def set_user_text_limit(user_id: int, texts_limit: int):
     cursor.execute(
         """
         UPDATE users
-        SET texts_limit = ?,
-            free_limit = ?,
+        SET texts_limit = %s,
+            free_limit = %s,
             updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ?
+        WHERE user_id = %s
         """,
         (texts_limit, texts_limit, user_id)
     )
@@ -529,7 +452,7 @@ def add_request(
             from_cache,
             publication_status
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             public_id,
@@ -542,7 +465,7 @@ def add_request(
             detected_links,
             detected_domains,
             verdict,
-            int(from_cache),
+            from_cache,
             "pending"
         )
     )
@@ -558,7 +481,7 @@ def get_request_by_public_id(public_id: str):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM requests WHERE public_id = ?",
+        "SELECT * FROM requests WHERE public_id = %s",
         (public_id,)
     )
 
@@ -603,9 +526,9 @@ def update_publication_status(
     cursor.execute(
         """
         UPDATE requests
-        SET publication_status = ?,
-            published_message_id = ?
-        WHERE public_id = ?
+        SET publication_status = %s,
+            published_message_id = %s
+        WHERE public_id = %s
         """,
         (status, published_message_id, public_id)
     )
@@ -626,7 +549,7 @@ def get_cache(text_hash: str):
         """
         SELECT response_text, verdict
         FROM cache
-        WHERE text_hash = ?
+        WHERE text_hash = %s
         """,
         (text_hash,)
     )
@@ -648,13 +571,18 @@ def save_cache(
 
     cursor.execute(
         """
-        INSERT OR REPLACE INTO cache (
+        INSERT INTO cache (
             text_hash,
             original_text,
             response_text,
             verdict
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (text_hash) DO UPDATE SET
+            original_text = EXCLUDED.original_text,
+            response_text = EXCLUDED.response_text,
+            verdict = EXCLUDED.verdict,
+            updated_at = CURRENT_TIMESTAMP
         """,
         (text_hash, original_text, response_text, verdict)
     )
@@ -670,14 +598,13 @@ def add_feedback(user_id: int, username: str | None, feedback_text: str):
     cursor.execute(
         """
         INSERT INTO feedback (user_id, username, feedback_text)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
         """,
         (user_id, username, feedback_text)
     )
 
     connection.commit()
     connection.close()
-
 
 
 def get_recent_feedback(limit: int = 10):
@@ -689,7 +616,7 @@ def get_recent_feedback(limit: int = 10):
         SELECT id, user_id, username, feedback_text, created_at
         FROM feedback
         ORDER BY id DESC
-        LIMIT ?
+        LIMIT %s
         """,
         (limit,)
     )
@@ -698,6 +625,7 @@ def get_recent_feedback(limit: int = 10):
     connection.close()
 
     return rows
+
 
 def create_payment(
     user_id: int,
@@ -724,7 +652,7 @@ def create_payment(
             currency,
             status
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             order_id,
@@ -749,7 +677,7 @@ def get_payment_by_order_id(order_id: str):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM payments WHERE order_id = ?",
+        "SELECT * FROM payments WHERE order_id = %s",
         (order_id,)
     )
 
@@ -774,12 +702,12 @@ def update_payment_status(
     cursor.execute(
         f"""
         UPDATE payments
-        SET status = ?,
-            liqpay_order_id = COALESCE(?, liqpay_order_id),
-            raw_data = COALESCE(?, raw_data),
+        SET status = %s,
+            liqpay_order_id = COALESCE(%s, liqpay_order_id),
+            raw_data = COALESCE(%s, raw_data),
             updated_at = CURRENT_TIMESTAMP,
             paid_at = {paid_at_sql}
-        WHERE order_id = ?
+        WHERE order_id = %s
         """,
         (
             status,
@@ -802,7 +730,7 @@ def process_successful_payment(order_id: str, callback_data: dict) -> dict:
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM payments WHERE order_id = ?",
+        "SELECT * FROM payments WHERE order_id = %s",
         (order_id,)
     )
     payment = cursor.fetchone()
@@ -834,31 +762,32 @@ def process_successful_payment(order_id: str, callback_data: dict) -> dict:
         cursor.execute(
             """
             UPDATE payments
-            SET status = ?,
-                liqpay_order_id = ?,
-                raw_data = ?,
+            SET status = %s,
+                liqpay_order_id = %s,
+                raw_data = %s,
                 updated_at = CURRENT_TIMESTAMP,
                 paid_at = CURRENT_TIMESTAMP
-            WHERE order_id = ?
+            WHERE order_id = %s
             """,
             (status, liqpay_order_id, raw_data, order_id)
         )
 
         cursor.execute(
             """
-            INSERT OR IGNORE INTO users (user_id, last_free_reset_month)
-            VALUES (?, ?)
+            INSERT INTO users (user_id, texts_limit, free_limit, last_free_reset_month)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id) DO NOTHING
             """,
-            (payment["user_id"], current_month())
+            (payment["user_id"], FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month())
         )
 
         cursor.execute(
             """
             UPDATE users
-            SET paid_balance = paid_balance + ?,
+            SET paid_balance = paid_balance + %s,
                 plan = 'paid',
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
+            WHERE user_id = %s
             """,
             (payment["checks_added"], payment["user_id"])
         )
@@ -878,11 +807,11 @@ def process_successful_payment(order_id: str, callback_data: dict) -> dict:
     cursor.execute(
         """
         UPDATE payments
-        SET status = ?,
-            liqpay_order_id = ?,
-            raw_data = ?,
+        SET status = %s,
+            liqpay_order_id = %s,
+            raw_data = %s,
             updated_at = CURRENT_TIMESTAMP
-        WHERE order_id = ?
+        WHERE order_id = %s
         """,
         (status, liqpay_order_id, raw_data, order_id)
     )
@@ -921,7 +850,7 @@ def get_recent_payments(limit: int = 10):
             paid_at
         FROM payments
         ORDER BY id DESC
-        LIMIT ?
+        LIMIT %s
         """,
         (limit,)
     )
@@ -937,7 +866,7 @@ def get_payment_debug(order_id: str):
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT * FROM payments WHERE order_id = ?",
+        "SELECT * FROM payments WHERE order_id = %s",
         (order_id,)
     )
     payment = cursor.fetchone()
@@ -945,7 +874,7 @@ def get_payment_debug(order_id: str):
     user = None
     if payment is not None:
         cursor.execute(
-            "SELECT * FROM users WHERE user_id = ?",
+            "SELECT * FROM users WHERE user_id = %s",
             (payment["user_id"],)
         )
         user = cursor.fetchone()
@@ -964,19 +893,20 @@ def admin_add_paid_balance(user_id: int, checks: int) -> bool:
 
     cursor.execute(
         """
-        INSERT OR IGNORE INTO users (user_id, last_free_reset_month)
-        VALUES (?, ?)
+        INSERT INTO users (user_id, texts_limit, free_limit, last_free_reset_month)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (user_id) DO NOTHING
         """,
-        (user_id, current_month())
+        (user_id, FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month())
     )
 
     cursor.execute(
         """
         UPDATE users
-        SET paid_balance = paid_balance + ?,
+        SET paid_balance = paid_balance + %s,
             plan = 'paid',
             updated_at = CURRENT_TIMESTAMP
-        WHERE user_id = ?
+        WHERE user_id = %s
         """,
         (checks, user_id)
     )

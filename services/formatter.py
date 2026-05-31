@@ -12,66 +12,41 @@ VERDICT_EMOJIS = {
     "Інше": "ℹ️",
 }
 
-# Додаткові блоки моделі більше не показуються як окремі підзаголовки.
-# Вони додаються звичайними абзацами, щоб відповідь виглядала природніше.
-BLOCK_EMOJIS = {
-    "Деталі": "",
-    "Уточнення": "",
-    "Застереження": "",
-}
-
-LEGACY_BLOCK_TYPES = {
-    "Правда",
-    "Фейк",
-    "Маніпуляція",
-    "Недостатньо даних",
-}
-
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 RAW_URL_RE = re.compile(r"\(?https?://[^\s)]+\)?")
 
 
 def format_fact_check_response(result: dict) -> str:
     verdict = result.get("verdict", "Недостатньо даних")
+    headline = clean_model_text(result.get("headline", "").strip())
     summary = clean_model_text(result.get("summary", "").strip())
     blocks = result.get("blocks", [])
     sources = result.get("sources", [])
-
     verdict_emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
 
-    parts = [
-        f"{verdict_emoji} <b>{escape_html(verdict)}</b>",
-    ]
+    parts = [f"{verdict_emoji} <b>{escape_html(verdict)}</b>"]
+
+    if headline:
+        parts.extend(["", f"<b>{escape_html(headline)}</b>"])
 
     if summary:
-        parts.extend([
-            "",
-            escape_html(summary),
-        ])
+        parts.extend(["", escape_html(summary)])
 
     added_block_texts = set()
 
-    for block in blocks[:3]:
-        block_type = normalize_block_type(block.get("type", "Уточнення"), verdict)
+    for block in blocks[:1]:
         block_text = clean_model_text(block.get("text", "").strip())
 
-        if not block_text:
+        if not block_text or is_duplicate_block(block_text, summary, added_block_texts):
             continue
 
-        if is_duplicate_block(block_text, summary, added_block_texts):
-            continue
-
-        parts.extend([
-            "",
-            escape_html(block_text),
-        ])
+        parts.extend(["", escape_html(block_text)])
         added_block_texts.add(normalize_for_compare(block_text))
 
     formatted_sources = format_sources(sources)
 
     if formatted_sources:
-        parts.append("")
-        parts.append("<b>Джерела:</b>")
+        parts.extend(["", "<b>Джерела:</b>"])
         parts.extend(formatted_sources)
 
     return "\n".join(parts).strip()
@@ -90,33 +65,15 @@ def clean_model_text(text: str) -> str:
     return text.strip(" \n\t()[]")
 
 
-def normalize_block_type(block_type: str, verdict: str) -> str:
-    if block_type in LEGACY_BLOCK_TYPES:
-        if block_type == verdict:
-            return "Деталі"
-        return "Уточнення"
-
-    if block_type in BLOCK_EMOJIS:
-        return block_type
-
-    return "Уточнення"
-
-
 def is_duplicate_block(block_text: str, summary: str, added_block_texts: set[str]) -> bool:
     normalized = normalize_for_compare(block_text)
 
-    if not normalized:
-        return True
-
-    if normalized in added_block_texts:
+    if not normalized or normalized in added_block_texts:
         return True
 
     summary_normalized = normalize_for_compare(summary)
 
-    if normalized and summary_normalized and normalized in summary_normalized:
-        return True
-
-    return False
+    return bool(normalized and summary_normalized and normalized in summary_normalized)
 
 
 def normalize_for_compare(text: str) -> str:
@@ -154,6 +111,7 @@ def get_source_name(title: str, url: str) -> str:
             "apnews.com": "AP News",
             "bbc.com": "BBC",
             "bbc.co.uk": "BBC",
+            "suspilne.media": "Суспільне",
             "kyivindependent.com": "The Kyiv Independent",
             "ukrinform.ua": "Укрінформ",
             "pravda.com.ua": "Українська правда",

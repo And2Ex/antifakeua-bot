@@ -9,3 +9,7 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+
+# Local deployment notes / platform config
+DEPLOY_NEON_RENDER.md
+render.yaml

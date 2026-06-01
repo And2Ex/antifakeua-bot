@@ -14,6 +14,11 @@ VERDICT_EMOJIS = {
 
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 RAW_URL_RE = re.compile(r"\(?https?://[^\s)]+\)?")
+TRAILING_DOMAIN_CITATION_RE = re.compile(
+    r"\s*(?:\(|\[)?(?:https?://)?(?:www\.)?[A-Za-z0-9-]+"
+    r"(?:\.[A-Za-z0-9-]+)+(?:/[^\s)\]]*)?(?:\)|\])?[.,;:]?\s*$",
+    re.IGNORECASE,
+)
 
 
 def format_verdict_line(result: dict, include_reason: bool = True) -> str:
@@ -57,12 +62,19 @@ def format_fact_check_response(result: dict) -> str:
     return "\n".join(parts).strip()
 
 
-def clean_model_text(text: str) -> str:
+def clean_model_text(text: str, strip_trailing_citation: bool = True) -> str:
     if not text:
         return ""
 
     text = MARKDOWN_LINK_RE.sub(lambda match: match.group(1), text)
     text = RAW_URL_RE.sub("", text)
+    # The model can occasionally leave a source marker such as "(who.int"
+    # in narrative text. Sources are rendered separately below the answer.
+    if strip_trailing_citation:
+        previous = None
+        while previous != text:
+            previous = text
+            text = TRAILING_DOMAIN_CITATION_RE.sub("", text)
     text = re.sub(r"\s+([,.!?;:])", r"\1", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -93,7 +105,10 @@ def format_sources(sources: list[dict], limit: int = 5) -> list[str]:
     seen_urls = set()
 
     for source in sources[:limit]:
-        title = clean_model_text(str(source.get("title", "")).strip())
+        title = clean_model_text(
+            str(source.get("title", "")).strip(),
+            strip_trailing_citation=False,
+        )
         url = str(source.get("url", "")).strip()
 
         if not title or not is_valid_url(url) or url in seen_urls:
@@ -108,13 +123,8 @@ def format_sources(sources: list[dict], limit: int = 5) -> list[str]:
 
 
 def get_source_name(title: str, url: str) -> str:
-    domain = get_domain(url)
-
     if len(title) <= 70:
         return title
-
-    if domain:
-        return domain
 
     return title[:67].rstrip() + "..."
 

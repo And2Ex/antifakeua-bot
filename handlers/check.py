@@ -19,6 +19,7 @@ from services.cache import get_cached_response, save_cached_response
 from services.formatter import (
     extract_verdict_from_result,
     format_fact_check_response,
+    get_verdict_family,
 )
 from services.gpt import analyze_text
 from services.limiter import check_and_use_text_limit
@@ -201,6 +202,7 @@ def record_detected_sources(
     *,
     public_id: str,
     verdict: str,
+    verdict_family: str | None,
     source_type: str | None,
     source_title: str | None,
     source_link: str | None,
@@ -239,6 +241,7 @@ def record_detected_sources(
                         connection,
                         source_id=source_id,
                         verdict=verdict,
+                        verdict_family=verdict_family,
                     )
 
                 seen_keys.add(key)
@@ -270,6 +273,7 @@ def record_detected_sources(
                     connection,
                     source_id=source_id,
                     verdict=verdict,
+                    verdict_family=verdict_family,
                 )
 
             seen_keys.add(normalized)
@@ -364,6 +368,10 @@ async def process_text_check(
 
     cached_result = get_cached_response(text)
 
+    # Re-run legacy cached checks once so new flexible verdicts can be generated.
+    if cached_result is not None and not cached_result["result"].get("verdict_family"):
+        cached_result = None
+
     if cached_result is not None:
         cached_analysis = cached_result["result"]
         response = format_fact_check_response(cached_analysis)
@@ -387,6 +395,7 @@ async def process_text_check(
         record_detected_sources(
             public_id=public_id,
             verdict=cached_result["verdict"] or "Недостатньо даних",
+            verdict_family=get_verdict_family(cached_analysis),
             source_type=source_type,
             source_title=source_title,
             source_link=source_link,
@@ -477,6 +486,7 @@ async def process_text_check(
     record_detected_sources(
         public_id=public_id,
         verdict=verdict,
+        verdict_family=get_verdict_family(result),
         source_type=source_type,
         source_title=source_title,
         source_link=source_link,

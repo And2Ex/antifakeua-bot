@@ -1,11 +1,16 @@
 from html import escape
 
 from config import BOT_USERNAME
-from services.formatter import VERDICT_EMOJIS, clean_model_text
+from services.formatter import (
+    clean_model_text,
+    get_verdict_emoji,
+    get_verdict_family,
+    normalize_verdict_label,
+)
 from services.utils import escape_html
 
 
-MARKABLE_VERDICTS = {"Правда", "Фейк", "Маніпуляція"}
+MARKABLE_FAMILIES = {"true", "mixed", "false", "uncertain"}
 
 
 def build_public_check_url(public_id: str) -> str:
@@ -16,16 +21,17 @@ def build_quick_mark(result: dict, *, public_id: str) -> str | None:
     if not result.get("public_mark_allowed", False):
         return None
 
-    verdict = clean_model_text(result.get("verdict", "").strip())
+    family = get_verdict_family(result)
 
-    if verdict not in MARKABLE_VERDICTS:
+    if family not in MARKABLE_FAMILIES:
         return None
 
-    emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
+    verdict = normalize_verdict_label(result.get("verdict"))
+    emoji = get_verdict_emoji(result)
     line = f"{emoji} <b>{escape_html(verdict)}</b>"
     reason = clean_model_text(result.get("short_reason", "").strip())
 
-    if verdict != "Правда" and reason:
+    if family != "true" and reason:
         line += f" — {escape_html(reason)}"
 
     public_url = escape(build_public_check_url(public_id), quote=True)

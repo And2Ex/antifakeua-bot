@@ -18,7 +18,7 @@ from database.db import (
     skip_pending_publication_requests_through,
     update_publication_status,
 )
-from services.formatter import VERDICT_EMOJIS, clean_model_text
+from services.formatter import clean_model_text, get_verdict_emoji
 from services.progress import safe_delete_message
 from services.publication import generate_publication_draft
 from services.publisher import (
@@ -117,8 +117,9 @@ def build_queue_text(requests: list) -> str:
     ]
 
     for index, request in enumerate(requests, start=1):
+        result = get_saved_result(request) or {}
         verdict = request.get("verdict") or "Недостатньо даних"
-        emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
+        emoji = get_verdict_emoji(result or verdict)
         title = get_queue_title(request)
         url = build_public_check_url(request["public_id"])
         label = f"{emoji} {verdict} — {title}"

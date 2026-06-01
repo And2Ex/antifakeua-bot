@@ -4,13 +4,46 @@ from urllib.parse import urlparse
 from services.utils import escape_html
 
 
+VERDICT_FAMILY_EMOJIS = {
+    "true": "✅",
+    "mixed": "⚠️",
+    "false": "❌",
+    "uncertain": "🔎",
+    "other": "ℹ️",
+}
+
+LEGACY_VERDICT_FAMILIES = {
+    "правда": "true",
+    "переважно правда": "mixed",
+    "потребує контексту": "mixed",
+    "маніпуляція": "mixed",
+    "оманливе твердження": "mixed",
+    "застарілий контекст": "mixed",
+    "стара новина": "mixed",
+    "фейк": "false",
+    "неправда": "false",
+    "підробка": "false",
+    "хибна цитата": "false",
+    "непідтверджено": "uncertain",
+    "недостатньо даних": "uncertain",
+    "інше": "other",
+    "думка": "other",
+    "сатира": "other",
+    "не підлягає перевірці": "other",
+}
+
+# Compatibility for modules and old saved entries that still import this mapping.
 VERDICT_EMOJIS = {
+    label.title(): VERDICT_FAMILY_EMOJIS[family]
+    for label, family in LEGACY_VERDICT_FAMILIES.items()
+}
+VERDICT_EMOJIS.update({
     "Правда": "✅",
     "Фейк": "❌",
     "Маніпуляція": "⚠️",
-    "Недостатньо даних": "ℹ️",
+    "Недостатньо даних": "🔎",
     "Інше": "ℹ️",
-}
+})
 
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 RAW_URL_RE = re.compile(r"\(?https?://[^\s)]+\)?")
@@ -21,13 +54,60 @@ TRAILING_DOMAIN_CITATION_RE = re.compile(
 )
 
 
+def normalize_verdict_label(verdict: str | None) -> str:
+    label = clean_model_text(str(verdict or "").strip())
+    label = re.sub(r"\s+", " ", label).strip(" —:-")
+
+    if not label:
+        return "Недостатньо даних"
+
+    if len(label) > 45:
+        return "Недостатньо даних"
+
+    return label
+
+
+def get_verdict_family(result_or_verdict: dict | str | None) -> str:
+    if isinstance(result_or_verdict, dict):
+        family = str(result_or_verdict.get("verdict_family", "")).strip().lower()
+        verdict = normalize_verdict_label(result_or_verdict.get("verdict"))
+
+        if family in VERDICT_FAMILY_EMOJIS:
+            return family
+    else:
+        verdict = normalize_verdict_label(result_or_verdict)
+
+    lowered = verdict.casefold()
+
+    if lowered in LEGACY_VERDICT_FAMILIES:
+        return LEGACY_VERDICT_FAMILIES[lowered]
+
+    if any(word in lowered for word in ("фейк", "неправд", "підроб", "вигад", "хибн")):
+        return "false"
+
+    if any(word in lowered for word in ("маніп", "оман", "контекст", "перебільш", "застар")):
+        return "mixed"
+
+    if any(word in lowered for word in ("непідтверд", "недостат", "невідом", "не встанов")):
+        return "uncertain"
+
+    if "правд" in lowered or "підтвердж" in lowered:
+        return "true"
+
+    return "other"
+
+
+def get_verdict_emoji(result_or_verdict: dict | str | None) -> str:
+    return VERDICT_FAMILY_EMOJIS[get_verdict_family(result_or_verdict)]
+
+
 def format_verdict_line(result: dict, include_reason: bool = True) -> str:
-    verdict = clean_model_text(result.get("verdict", "Недостатньо даних").strip())
+    verdict = normalize_verdict_label(result.get("verdict"))
     reason = clean_model_text(result.get("short_reason", "").strip())
-    emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
+    emoji = get_verdict_emoji(result)
     line = f"{emoji} <b>{escape_html(verdict)}</b>"
 
-    if include_reason and reason and verdict != "Правда":
+    if include_reason and reason and get_verdict_family(result) != "true":
         line += f" — {escape_html(reason)}"
 
     return line
@@ -145,9 +225,4 @@ def is_valid_url(url: str) -> bool:
 
 
 def extract_verdict_from_result(result: dict) -> str:
-    verdict = result.get("verdict", "Недостатньо даних")
-
-    if verdict not in VERDICT_EMOJIS:
-        return "Інше"
-
-    return verdict
+    return normalize_verdict_label(result.get("verdict"))

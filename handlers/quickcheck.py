@@ -84,10 +84,7 @@ def get_post_source_info(message: Message) -> tuple[str, str, str | None]:
 
 def is_own_marker(text: str) -> bool:
     lowered = text.lower()
-    return (
-        "antifakeua" in lowered
-        and ("правда" in lowered or "маніпуляц" in lowered or "фейк" in lowered)
-    )
+    return "antifakeua" in lowered
 
 
 def channel_picker_keyboard() -> ReplyKeyboardMarkup:
@@ -420,6 +417,10 @@ async def process_automatic_post(message: Message) -> None:
 
     cached_result = get_cached_response(normalized)
 
+    # Re-run legacy cached checks once so new flexible verdicts can be generated.
+    if cached_result is not None and not cached_result["result"].get("verdict_family"):
+        cached_result = None
+
     if cached_result is None:
         limit_allowed, _ = check_and_use_text_limit(setting["enabled_by"])
 
@@ -467,7 +468,7 @@ async def process_automatic_post(message: Message) -> None:
         )
         return
 
-    if not result.get("public_mark_allowed", False) or result.get("verdict") not in {"Правда", "Фейк", "Маніпуляція"}:
+    if not result.get("public_mark_allowed", False):
         await safe_delete_message(status_message)
         complete_quick_check(
             chat_id=message.chat.id,

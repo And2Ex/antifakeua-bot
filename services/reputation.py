@@ -8,10 +8,27 @@ from typing import Any
 from urllib.parse import urlparse
 
 
+FAMILY_FIELD_MAP = {
+    "true": "true_count",
+    "mixed": "manipulation_count",
+    "false": "fake_count",
+    "uncertain": "unverified_count",
+    "other": "unverified_count",
+}
+
+
 VERDICT_FIELD_MAP = {
     "правда": "true_count",
-    "фейк": "fake_count",
+    "переважно правда": "manipulation_count",
+    "потребує контексту": "manipulation_count",
     "маніпуляція": "manipulation_count",
+    "оманливе твердження": "manipulation_count",
+    "застарілий контекст": "stale_count",
+    "фейк": "fake_count",
+    "неправда": "fake_count",
+    "підробка": "fake_count",
+    "хибна цитата": "fake_count",
+    "непідтверджено": "unverified_count",
     "непідтверджено": "unverified_count",
     "недостатньо даних": "unverified_count",
     "інше": "unverified_count",
@@ -100,8 +117,12 @@ def update_source_verdict(
     *,
     source_id: int,
     verdict: str,
+    verdict_family: str | None = None,
 ) -> None:
-    field = VERDICT_FIELD_MAP.get(verdict.strip().lower(), "unverified_count")
+    field = FAMILY_FIELD_MAP.get(
+        (verdict_family or "").strip().lower(),
+        VERDICT_FIELD_MAP.get(verdict.strip().lower(), "unverified_count"),
+    )
     conn.execute(
         f"""
         UPDATE sources

@@ -168,7 +168,8 @@ async def analyze_text(text: str) -> dict:
     try:
         response = await client.responses.create(
             model=OPENAI_MODEL,
-            tools=[{"type": "web_search_preview"}],
+            tools=[{"type": "web_search"}],
+            tool_choice="required",
             input=[
                 {"role": "developer", "content": FACT_CHECK_PROMPT},
                 {"role": "user", "content": text},

@@ -10,6 +10,7 @@ load_dotenv(BASE_DIR / ".env")
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BOT_USERNAME = os.getenv("BOT_USERNAME", "AntiFakeUA_Bot").strip().lstrip("@")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip()
 

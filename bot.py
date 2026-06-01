@@ -12,6 +12,7 @@ from handlers import (
     help,
     limits,
     publish,
+    quickcheck,
     review,
     start,
     transparency,
@@ -33,6 +34,7 @@ def setup_routers():
     dp.include_router(buy.router)
     dp.include_router(admin.router)
     dp.include_router(publish.router)
+    dp.include_router(quickcheck.router)
     dp.include_router(review.router)
     dp.include_router(analytics.router)
     dp.include_router(check.router)

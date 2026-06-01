@@ -14,12 +14,6 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
-async def make_public_link(message: Message, public_id: str) -> str:
-    bot_info = await message.bot.get_me()
-
-    return f"https://t.me/{bot_info.username}?start={public_id}"
-
-
 @router.message(Command("publish"))
 async def publish_handler(message: Message):
     if not is_admin(message.from_user.id):
@@ -43,13 +37,10 @@ async def publish_handler(message: Message):
         await message.answer("Перевірку не знайдено.")
         return
 
-    public_link = await make_public_link(message, public_id)
-
     try:
         published_message = await publish_check_to_channel(
             bot=message.bot,
             request=request,
-            public_link=public_link
         )
     except Exception as error:
         await message.answer(f"Не вдалося опублікувати: {error}")

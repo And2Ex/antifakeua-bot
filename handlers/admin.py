@@ -79,9 +79,15 @@ async def send_stats(message: Message) -> None:
         for row in stats["payment_status_stats"]
     ]
 
+    quick_check_lines = [
+        f"{row['status']}: {row['count']}"
+        for row in stats["quick_check_status_stats"]
+    ]
+
     verdict_text = "\n".join(verdict_lines) if verdict_lines else "ще немає даних"
     publication_text = "\n".join(publication_lines) if publication_lines else "ще немає даних"
     payment_text = "\n".join(payment_lines) if payment_lines else "ще немає даних"
+    quick_check_text = "\n".join(quick_check_lines) if quick_check_lines else "ще немає даних"
 
     await message.answer(
         "📊 <b>Статистика бота</b>\n\n"
@@ -89,11 +95,15 @@ async def send_stats(message: Message) -> None:
         f"Запитів: {stats['requests_count']}\n"
         f"Кешованих відповідей: {stats['cache_count']}\n"
         f"Відгуків: {stats['feedback_count']}\n"
-        f"Платежів: {stats['payments_count']}\n\n"
+        f"Платежів: {stats['payments_count']}\n"
+        f"Каналів з авто-QuickCheck: {stats['automatic_channels_count']}\n"
+        f"Коротких перевірок: {stats['quick_checks_count']}\n\n"
         "<b>Вердикти:</b>\n"
         f"{escape(verdict_text)}\n\n"
         "<b>Публікації:</b>\n"
         f"{escape(publication_text)}\n\n"
+        "<b>QuickCheck:</b>\n"
+        f"{escape(quick_check_text)}\n\n"
         "<b>Платежі:</b>\n"
         f"{escape(payment_text)}",
         parse_mode="HTML",

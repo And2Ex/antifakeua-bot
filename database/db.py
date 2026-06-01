@@ -12,8 +12,9 @@ from config import FREE_TEXT_LIMIT, require_database_url
 BASE_DIR = Path(__file__).resolve().parent.parent
 SCHEMA_PATH = BASE_DIR / "database" / "schema.sql"
 
-REQUEST_STATUSES = {"pending", "published", "skipped", "rejected"}
+REQUEST_STATUSES = {"pending", "published", "skipped", "rejected", "quickcheck"}
 SUCCESS_PAYMENT_STATUSES = {"success", "sandbox"}
+CHANNEL_MODES = {"manual", "auto"}
 
 
 def get_connection():
@@ -429,12 +430,23 @@ def add_request(
     detected_links: str | None = None,
     detected_domains: str | None = None,
     verdict: str | None = None,
-    from_cache: bool = False
+    from_cache: bool = False,
+    result: dict | None = None,
+    is_publishable: bool = True,
+    queue_for_publication: bool = True,
 ) -> str:
     connection = get_connection()
     cursor = connection.cursor()
 
     public_id = generate_public_id()
+    result_json = json.dumps(result, ensure_ascii=False) if result is not None else None
+    publication_status = (
+        "pending"
+        if is_publishable and queue_for_publication
+        else "quickcheck"
+        if is_publishable
+        else "rejected"
+    )
 
     cursor.execute(
         """
@@ -450,9 +462,11 @@ def add_request(
             detected_domains,
             verdict,
             from_cache,
+            result_json,
+            is_publishable,
             publication_status
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             public_id,
@@ -466,7 +480,9 @@ def add_request(
             detected_domains,
             verdict,
             from_cache,
-            "pending"
+            result_json,
+            is_publishable,
+            publication_status,
         )
     )
 
@@ -500,6 +516,8 @@ def get_next_pending_request():
         SELECT *
         FROM requests
         WHERE publication_status = 'pending'
+          AND is_publishable = TRUE
+          AND result_json IS NOT NULL
           AND response_text IS NOT NULL
         ORDER BY created_at ASC, id ASC
         LIMIT 1
@@ -547,7 +565,7 @@ def get_cache(text_hash: str):
 
     cursor.execute(
         """
-        SELECT response_text, verdict
+        SELECT response_text, verdict, result_json
         FROM cache
         WHERE text_hash = %s
         """,
@@ -557,6 +575,11 @@ def get_cache(text_hash: str):
     result = cursor.fetchone()
     connection.close()
 
+    if result is None or not result.get("result_json"):
+        return None
+
+    result["result"] = json.loads(result["result_json"])
+
     return result
 
 
@@ -564,10 +587,12 @@ def save_cache(
     text_hash: str,
     original_text: str,
     response_text: str,
-    verdict: str | None = None
+    verdict: str | None = None,
+    result: dict | None = None,
 ):
     connection = get_connection()
     cursor = connection.cursor()
+    result_json = json.dumps(result, ensure_ascii=False) if result is not None else None
 
     cursor.execute(
         """
@@ -575,16 +600,18 @@ def save_cache(
             text_hash,
             original_text,
             response_text,
-            verdict
+            verdict,
+            result_json
         )
-        VALUES (%s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (text_hash) DO UPDATE SET
             original_text = EXCLUDED.original_text,
             response_text = EXCLUDED.response_text,
             verdict = EXCLUDED.verdict,
+            result_json = EXCLUDED.result_json,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (text_hash, original_text, response_text, verdict)
+        (text_hash, original_text, response_text, verdict, result_json)
     )
 
     connection.commit()
@@ -983,6 +1010,22 @@ def get_basic_stats():
     cursor.execute("SELECT COUNT(*) AS count FROM payments")
     payments_count = cursor.fetchone()["count"]
 
+    cursor.execute("SELECT COUNT(*) AS count FROM channel_settings WHERE mode = 'auto'")
+    automatic_channels_count = cursor.fetchone()["count"]
+
+    cursor.execute("SELECT COUNT(*) AS count FROM quick_checks")
+    quick_checks_count = cursor.fetchone()["count"]
+
+    cursor.execute(
+        """
+        SELECT status, COUNT(*) AS count
+        FROM quick_checks
+        GROUP BY status
+        ORDER BY count DESC
+        """
+    )
+    quick_check_status_stats = cursor.fetchall()
+
     cursor.execute(
         """
         SELECT verdict, COUNT(*) AS count
@@ -1022,6 +1065,9 @@ def get_basic_stats():
         "cache_count": cache_count,
         "feedback_count": feedback_count,
         "payments_count": payments_count,
+        "automatic_channels_count": automatic_channels_count,
+        "quick_checks_count": quick_checks_count,
+        "quick_check_status_stats": quick_check_status_stats,
         "verdict_stats": verdict_stats,
         "publication_stats": publication_stats,
         "payment_status_stats": payment_status_stats,
@@ -1086,3 +1132,133 @@ def get_chat_source_stats():
     connection.close()
 
     return rows
+
+def get_channel_setting(chat_id: int):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "SELECT * FROM channel_settings WHERE chat_id = %s",
+        (chat_id,),
+    )
+    row = cursor.fetchone()
+    connection.close()
+
+    return row
+
+
+def save_channel_setting(
+    *,
+    chat_id: int,
+    chat_title: str | None,
+    chat_type: str,
+    enabled_by: int,
+    mode: str = "manual",
+) -> None:
+    if mode not in CHANNEL_MODES:
+        raise ValueError(f"Невідомий режим QuickCheck: {mode}")
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO channel_settings (
+            chat_id, chat_title, chat_type, mode, enabled_by, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (chat_id) DO UPDATE SET
+            chat_title = EXCLUDED.chat_title,
+            chat_type = EXCLUDED.chat_type,
+            enabled_by = EXCLUDED.enabled_by,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (chat_id, chat_title, chat_type, mode, enabled_by),
+    )
+
+    connection.commit()
+    connection.close()
+
+
+def set_channel_mode(chat_id: int, mode: str, enabled_by: int) -> bool:
+    if mode not in CHANNEL_MODES:
+        raise ValueError(f"Невідомий режим QuickCheck: {mode}")
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        UPDATE channel_settings
+        SET mode = %s,
+            enabled_by = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE chat_id = %s
+        """,
+        (mode, enabled_by, chat_id),
+    )
+
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
+
+
+def reserve_quick_check(
+    *,
+    chat_id: int,
+    message_id: int,
+    post_hash: str,
+) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        INSERT INTO quick_checks (chat_id, source_message_id, post_hash, status)
+        VALUES (%s, %s, %s, 'processing')
+        ON CONFLICT (chat_id, source_message_id) DO NOTHING
+        """,
+        (chat_id, message_id, post_hash),
+    )
+
+    inserted = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return inserted
+
+
+def complete_quick_check(
+    *,
+    chat_id: int,
+    message_id: int,
+    status: str,
+    verdict: str | None = None,
+    short_note: str | None = None,
+    marker_message_id: int | None = None,
+    public_id: str | None = None,
+    was_reply: bool = False,
+) -> None:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        UPDATE quick_checks
+        SET status = %s,
+            verdict = %s,
+            short_note = %s,
+            marker_message_id = %s,
+            public_id = %s,
+            was_reply = %s,
+            completed_at = CURRENT_TIMESTAMP
+        WHERE chat_id = %s AND source_message_id = %s
+        """,
+        (status, verdict, short_note, marker_message_id, public_id, was_reply, chat_id, message_id),
+    )
+
+    connection.commit()
+    connection.close()
+

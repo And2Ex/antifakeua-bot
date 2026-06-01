@@ -16,7 +16,7 @@ from database.db import (
     get_request_by_public_id,
     update_publication_status,
 )
-from services.publisher import publish_check_to_channel
+from services.publisher import build_channel_post, publish_check_to_channel
 from services.utils import truncate_text
 
 
@@ -29,53 +29,40 @@ def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
 
 
-async def make_public_link(message_or_callback, public_id: str) -> str:
-    bot = message_or_callback.bot
-    bot_info = await bot.get_me()
-
-    return f"https://t.me/{bot_info.username}?start={public_id}"
-
-
-def build_review_keyboard(public_id: str, public_link: str, source_link: str | None) -> InlineKeyboardMarkup:
+def build_review_keyboard(public_id: str, source_link: str | None) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
                 text="✅ Опублікувати",
-                callback_data=f"review_publish:{public_id}"
+                callback_data=f"review_publish:{public_id}",
             )
         ],
         [
             InlineKeyboardButton(
                 text="⏭ Пропустити",
-                callback_data=f"review_skip:{public_id}"
+                callback_data=f"review_skip:{public_id}",
             ),
             InlineKeyboardButton(
                 text="🗑 Не публікувати",
-                callback_data=f"review_reject:{public_id}"
-            )
+                callback_data=f"review_reject:{public_id}",
+            ),
         ],
-        [
-            InlineKeyboardButton(
-                text="🔗 Публічна перевірка",
-                url=public_link
-            )
-        ]
     ]
 
     if source_link:
         rows.append([
             InlineKeyboardButton(
                 text="📌 Оригінальний допис",
-                url=source_link
+                url=source_link,
             )
         ])
 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_review_text(request, public_link: str) -> str:
+def build_review_text(request) -> str:
     request_text = truncate_text(request["request_text"], 800)
-    response_text = request["response_text"] or "Текст перевірки не збережено."
+    preview_text = build_channel_post(request)
     verdict = request["verdict"] or "Немає"
     source_title = request["source_title"] or "невідомо"
 
@@ -83,12 +70,11 @@ def build_review_text(request, public_link: str) -> str:
         "🧾 <b>Перевірка на публікацію</b>\n\n"
         f"<b>ID:</b> {escape(request['public_id'])}\n"
         f"<b>Вердикт:</b> {escape(verdict)}\n"
-        f"<b>Джерело:</b> {escape(source_title)}\n\n"
+        f"<b>Опубліковано в:</b> {escape(source_title)}\n\n"
         "<b>Оригінальний текст:</b>\n"
         f"{escape(request_text)}\n\n"
-        "<b>Відповідь бота:</b>\n"
-        f"{response_text}\n\n"
-        f"🔗 <a href=\"{escape(public_link, quote=True)}\">Публічна перевірка</a>"
+        "<b>Майбутній допис у каналі:</b>\n"
+        f"{preview_text}"
     )
 
 
@@ -99,16 +85,13 @@ async def send_next_review(message: Message):
         await message.answer("Немає непереглянутих перевірок.")
         return
 
-    public_link = await make_public_link(message, request["public_id"])
-
     await message.answer(
-        build_review_text(request, public_link),
+        build_review_text(request),
         parse_mode="HTML",
         link_preview_options=NO_LINK_PREVIEW,
         reply_markup=build_review_keyboard(
             request["public_id"],
-            public_link,
-            request["source_link"]
+            request["source_link"],
         )
     )
 
@@ -181,13 +164,10 @@ async def review_publish_callback(callback: CallbackQuery):
         return
 
     await callback.answer("Публікую…")
-    public_link = await make_public_link(callback, public_id)
-
     try:
         published_message = await publish_check_to_channel(
             bot=callback.bot,
             request=request,
-            public_link=public_link
         )
     except Exception as error:
         await callback.message.answer(f"Помилка публікації: {error}")

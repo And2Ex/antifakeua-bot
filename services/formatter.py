@@ -16,18 +16,23 @@ MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
 RAW_URL_RE = re.compile(r"\(?https?://[^\s)]+\)?")
 
 
+def format_verdict_line(result: dict, include_reason: bool = True) -> str:
+    verdict = clean_model_text(result.get("verdict", "Недостатньо даних").strip())
+    reason = clean_model_text(result.get("short_reason", "").strip())
+    emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
+    line = f"{emoji} <b>{escape_html(verdict)}</b>"
+
+    if include_reason and reason and verdict != "Правда":
+        line += f" — {escape_html(reason)}"
+
+    return line
+
+
 def format_fact_check_response(result: dict) -> str:
-    verdict = result.get("verdict", "Недостатньо даних")
-    headline = clean_model_text(result.get("headline", "").strip())
     summary = clean_model_text(result.get("summary", "").strip())
     blocks = result.get("blocks", [])
     sources = result.get("sources", [])
-    verdict_emoji = VERDICT_EMOJIS.get(verdict, "ℹ️")
-
-    parts = [f"{verdict_emoji} <b>{escape_html(verdict)}</b>"]
-
-    if headline:
-        parts.extend(["", f"<b>{escape_html(headline)}</b>"])
+    parts = [format_verdict_line(result)]
 
     if summary:
         parts.extend(["", escape_html(summary)])
@@ -46,7 +51,7 @@ def format_fact_check_response(result: dict) -> str:
     formatted_sources = format_sources(sources)
 
     if formatted_sources:
-        parts.extend(["", "<b>Джерела:</b>"])
+        parts.extend(["", "<b>Джерела перевірки:</b>"])
         parts.extend(formatted_sources)
 
     return "\n".join(parts).strip()
@@ -73,7 +78,10 @@ def is_duplicate_block(block_text: str, summary: str, added_block_texts: set[str
 
     summary_normalized = normalize_for_compare(summary)
 
-    return bool(normalized and summary_normalized and normalized in summary_normalized)
+    if normalized in summary_normalized or summary_normalized in normalized:
+        return True
+
+    return False
 
 
 def normalize_for_compare(text: str) -> str:
@@ -81,89 +89,55 @@ def normalize_for_compare(text: str) -> str:
 
 
 def format_sources(sources: list[dict], limit: int = 5) -> list[str]:
-    formatted_sources = []
-    used_urls = set()
+    formatted = []
+    seen_urls = set()
 
     for source in sources[:limit]:
-        title = clean_model_text(source.get("title", "").strip())
-        url = source.get("url", "").strip()
+        title = clean_model_text(str(source.get("title", "")).strip())
+        url = str(source.get("url", "")).strip()
 
-        if not is_valid_url(url) or url in used_urls:
+        if not title or not is_valid_url(url) or url in seen_urls:
             continue
 
-        source_name = get_source_name(title, url)
+        safe_title = escape_html(get_source_name(title, url))
+        safe_url = escape_html(url)
+        formatted.append(f'• <a href="{safe_url}">{safe_title}</a>')
+        seen_urls.add(url)
 
-        if source_name:
-            formatted_sources.append(
-                f'• <a href="{escape_html(url)}">{escape_html(source_name)}</a>'
-            )
-            used_urls.add(url)
-
-    return formatted_sources
+    return formatted
 
 
 def get_source_name(title: str, url: str) -> str:
     domain = get_domain(url)
 
+    if len(title) <= 70:
+        return title
+
     if domain:
-        known_names = {
-            "reuters.com": "Reuters",
-            "apnews.com": "AP News",
-            "bbc.com": "BBC",
-            "bbc.co.uk": "BBC",
-            "suspilne.media": "Суспільне",
-            "kyivindependent.com": "The Kyiv Independent",
-            "ukrinform.ua": "Укрінформ",
-            "pravda.com.ua": "Українська правда",
-            "transparency.org": "Transparency International",
-            "worldbank.org": "World Bank",
-            "nato.int": "NATO",
-            "who.int": "WHO",
-            "un.org": "UN",
-            "president.gov.ua": "Офіс Президента України",
-            "kmu.gov.ua": "Кабінет Міністрів України",
-            "rada.gov.ua": "Верховна Рада України",
-            "mfa.gov.ua": "МЗС України",
-            "mil.gov.ua": "Міноборони України",
-        }
+        return domain
 
-        for known_domain, name in known_names.items():
-            if domain.endswith(known_domain):
-                return name
-
-    if title:
-        clean_title = (
-            title
-            .split("|")[0]
-            .split(" - ")[0]
-            .split(" — ")[0]
-            .strip()
-        )
-
-        if len(clean_title) > 45:
-            clean_title = clean_title[:42] + "..."
-
-        if clean_title:
-            return clean_title
-
-    return domain
+    return title[:67].rstrip() + "..."
 
 
 def get_domain(url: str) -> str:
-    parsed = urlparse(url)
-    domain = parsed.netloc.lower()
-
-    if domain.startswith("www."):
-        domain = domain[4:]
-
-    return domain
+    try:
+        return urlparse(url).netloc.removeprefix("www.")
+    except ValueError:
+        return ""
 
 
 def is_valid_url(url: str) -> bool:
-    parsed = urlparse(url)
-
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    except ValueError:
+        return False
 
 
 def extract_verdict_from_result(result: dict) -> str:
-    return result.get("verdict", "Недостатньо даних")
+    verdict = result.get("verdict", "Недостатньо даних")
+
+    if verdict not in VERDICT_EMOJIS:
+        return "Інше"
+
+    return verdict

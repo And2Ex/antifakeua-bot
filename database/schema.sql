@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS requests (
     from_cache BOOLEAN NOT NULL DEFAULT FALSE,
     publication_status TEXT NOT NULL DEFAULT 'pending',
     published_message_id BIGINT,
+    result_json TEXT,
+    is_publishable BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -35,14 +37,20 @@ CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_requests_publication_status ON requests(publication_status);
 
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS result_json TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS is_publishable BOOLEAN NOT NULL DEFAULT TRUE;
+
 CREATE TABLE IF NOT EXISTS cache (
     text_hash TEXT PRIMARY KEY,
     original_text TEXT NOT NULL,
     response_text TEXT NOT NULL,
     verdict TEXT,
+    result_json TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE cache ADD COLUMN IF NOT EXISTS result_json TEXT;
 
 CREATE TABLE IF NOT EXISTS feedback (
     id BIGSERIAL PRIMARY KEY,
@@ -174,3 +182,36 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS channel_settings (
+    chat_id BIGINT PRIMARY KEY,
+    chat_title TEXT,
+    chat_type TEXT NOT NULL DEFAULT 'channel',
+    mode TEXT NOT NULL DEFAULT 'manual',
+    enabled_by BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT channel_settings_mode_check CHECK (mode IN ('manual', 'auto'))
+);
+
+CREATE TABLE IF NOT EXISTS quick_checks (
+    id BIGSERIAL PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    source_message_id BIGINT NOT NULL,
+    post_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'processing',
+    verdict TEXT,
+    short_note TEXT,
+    marker_message_id BIGINT,
+    public_id TEXT,
+    was_reply BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ,
+    UNIQUE (chat_id, source_message_id)
+);
+
+ALTER TABLE quick_checks ADD COLUMN IF NOT EXISTS public_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_quick_checks_created_at ON quick_checks(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quick_checks_public_id ON quick_checks(public_id);
+

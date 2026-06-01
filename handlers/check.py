@@ -1,7 +1,4 @@
-import asyncio
 from html import escape
-from time import monotonic
-from typing import Awaitable, TypeVar
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -16,6 +13,7 @@ from services.formatter import (
 )
 from services.gpt import analyze_text
 from services.limiter import check_and_use_text_limit
+from services.progress import PROGRESS_FRAMES, run_with_progress, safe_delete_message
 from services.reputation import (
     get_or_create_source,
     normalize_domain,
@@ -29,71 +27,6 @@ from services.utils import generate_text_hash, is_meaningful_text, normalize_tex
 router = Router()
 
 NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
-
-T = TypeVar("T")
-
-PROGRESS_STATUS_ENABLED = True
-PROGRESS_MIN_SECONDS = 4.0
-PROGRESS_STEP_SECONDS = 1.3
-PROGRESS_DELETE_STATUS = True
-
-PROGRESS_STAGES = [
-    "🔎 Аналізую твердження...",
-    "🌐 Зіставляю з відкритими джерелами...",
-    "🧠 Узагальнюю результат перевірки...",
-]
-
-
-async def safe_edit_message(message: Message, text: str):
-    try:
-        await message.edit_text(text)
-    except Exception as error:
-        error_text = str(error).lower()
-
-        if "message is not modified" in error_text:
-            return
-
-        print(f"PROGRESS EDIT ERROR: {error}")
-
-
-async def safe_delete_message(message: Message):
-    try:
-        await message.delete()
-    except Exception as error:
-        print(f"PROGRESS DELETE ERROR: {error}")
-
-
-async def run_with_progress(status_message: Message, work: Awaitable[T]) -> T:
-    if not PROGRESS_STATUS_ENABLED:
-        return await work
-
-    task = asyncio.create_task(work)
-    started_at = monotonic()
-    stage_index = 0
-    last_stage_text = status_message.text or ""
-
-    try:
-        while True:
-            elapsed = monotonic() - started_at
-            min_time_passed = elapsed >= PROGRESS_MIN_SECONDS
-
-            if task.done() and min_time_passed:
-                break
-
-            stage_text = PROGRESS_STAGES[stage_index % len(PROGRESS_STAGES)]
-
-            if stage_text != last_stage_text:
-                await safe_edit_message(status_message, stage_text)
-                last_stage_text = stage_text
-
-            stage_index += 1
-            await asyncio.sleep(max(PROGRESS_STEP_SECONDS, 0.2))
-
-        return await task
-
-    finally:
-        if PROGRESS_DELETE_STATUS:
-            await safe_delete_message(status_message)
 
 
 def get_message_text(message: Message) -> str | None:
@@ -156,12 +89,6 @@ def get_source_info(message: Message) -> tuple[str | None, str | None, str | Non
     return chat.type, chat.title, None
 
 
-async def make_public_link(message: Message, public_id: str) -> str:
-    bot_info = await message.bot.get_me()
-
-    return f"https://t.me/{bot_info.username}?start={public_id}"
-
-
 def build_reply_parameters(source_message: Message, requester_message: Message) -> ReplyParameters | None:
     if source_message.chat.id != requester_message.chat.id:
         return None
@@ -172,19 +99,11 @@ def build_reply_parameters(source_message: Message, requester_message: Message) 
     return ReplyParameters(message_id=source_message.message_id)
 
 
-def build_extra_links(public_link: str, source_link: str | None) -> str:
-    parts = []
+def build_extra_links(source_link: str | None) -> str:
+    if not source_link:
+        return ""
 
-    if source_link:
-        parts.append(
-            f'📌 <a href="{escape(source_link, quote=True)}">Оригінальний допис</a>'
-        )
-
-    parts.append(
-        f'🔗 <a href="{escape(public_link, quote=True)}">Публічна перевірка</a>'
-    )
-
-    return "\n".join(parts)
+    return f'📌 <a href="{escape(source_link, quote=True)}">Оригінальний допис</a>'
 
 
 def get_link_source_type(link: str) -> str:
@@ -283,14 +202,13 @@ def record_detected_sources(
 async def send_final_response(
     requester_message: Message,
     response: str,
-    public_link: str,
     source_link: str | None,
     limit_message: str = "",
     reply_parameters: ReplyParameters | None = None,
 ):
     parts = [
         response,
-        build_extra_links(public_link, source_link),
+        build_extra_links(source_link),
     ]
 
     if limit_message:
@@ -361,7 +279,8 @@ async def process_text_check(
     cached_result = get_cached_response(text)
 
     if cached_result is not None:
-        response = cached_result["response_text"]
+        cached_analysis = cached_result["result"]
+        response = format_fact_check_response(cached_analysis)
         public_id = add_request(
             user_id=user.id,
             request_text=text,
@@ -372,7 +291,9 @@ async def process_text_check(
             detected_links=links_text,
             detected_domains=domains_text,
             verdict=cached_result["verdict"],
-            from_cache=True
+            from_cache=True,
+            result=cached_analysis,
+            is_publishable=bool(cached_analysis.get("public_mark_allowed", False)),
         )
 
         record_detected_sources(
@@ -385,14 +306,11 @@ async def process_text_check(
             count_verdict=False,
         )
 
-        public_link = await make_public_link(requester_message, public_id)
-
         await send_final_response(
             requester_message=requester_message,
             response=response,
-            public_link=public_link,
             source_link=source_link,
-            limit_message="🔁 Цю новину вже перевіряли раніше. Ліміт не списано.",
+            limit_message="",
             reply_parameters=reply_parameters,
         )
 
@@ -415,15 +333,18 @@ async def process_text_check(
         return
 
     status_message = await requester_message.answer(
-        "🔎 Аналізую твердження...",
+        PROGRESS_FRAMES[0],
         reply_parameters=reply_parameters,
         disable_notification=True,
     )
 
-    result = await run_with_progress(
-        status_message=status_message,
-        work=analyze_text(text),
-    )
+    try:
+        result = await run_with_progress(
+            status_message=status_message,
+            work=analyze_text(text),
+        )
+    finally:
+        await safe_delete_message(status_message)
 
     base_response = format_fact_check_response(result)
     response = base_response
@@ -432,7 +353,8 @@ async def process_text_check(
     save_cached_response(
         text=text,
         response=base_response,
-        verdict=verdict
+        verdict=verdict,
+        result=result,
     )
 
     public_id = add_request(
@@ -445,7 +367,9 @@ async def process_text_check(
         detected_links=links_text,
         detected_domains=domains_text,
         verdict=verdict,
-        from_cache=False
+        from_cache=False,
+        result=result,
+        is_publishable=bool(result.get("public_mark_allowed", False)),
     )
 
     record_detected_sources(
@@ -458,12 +382,9 @@ async def process_text_check(
         count_verdict=True,
     )
 
-    public_link = await make_public_link(requester_message, public_id)
-
     await send_final_response(
         requester_message=requester_message,
         response=response,
-        public_link=public_link,
         source_link=source_link,
         limit_message=limit_message,
         reply_parameters=reply_parameters,

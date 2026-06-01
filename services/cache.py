@@ -8,12 +8,18 @@ def get_cached_response(text: str):
     return get_cache(text_hash)
 
 
-def save_cached_response(text: str, response: str, verdict: str | None = None):
+def save_cached_response(
+    text: str,
+    response: str,
+    verdict: str | None = None,
+    result: dict | None = None,
+):
     text_hash = generate_text_hash(text)
 
     save_cache(
         text_hash=text_hash,
         original_text=text,
         response_text=response,
-        verdict=verdict
+        verdict=verdict,
+        result=result,
     )

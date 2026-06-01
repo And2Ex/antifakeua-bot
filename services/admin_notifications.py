@@ -53,7 +53,7 @@ async def notify_new_user(bot: Bot, user_id: int, username: str | None, first_na
 async def notify_new_group(bot: Bot, chat_id: int, title: str | None, chat_type: str | None) -> None:
     await notify_admins(
         bot,
-        "Бота додано в групу",
+        "Бота додано в канал або групу",
         [
             f"Назва: <b>{escape(title or 'без назви')}</b>",
             f"Тип: {escape(chat_type or 'невідомо')}",

@@ -18,7 +18,7 @@ async def bot_chat_member_handler(event: ChatMemberUpdated):
     if new_status not in {"member", "administrator"}:
         return
 
-    if event.chat.type not in {"group", "supergroup"}:
+    if event.chat.type not in {"group", "supergroup", "channel"}:
         return
 
     await notify_new_group(

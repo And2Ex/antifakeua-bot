@@ -6,6 +6,7 @@ from database.db import (
     add_user,
     consume_donation_intent,
     create_donation_submission,
+    has_donation_intent,
     set_donation_intent,
 )
 from keyboards.support import build_support_keyboard
@@ -65,15 +66,36 @@ async def donation_screenshot_handler(message: Message):
     if user is None:
         return
 
-    if not consume_donation_intent(user.id):
+    if not has_donation_intent(user.id):
+        if message.media_group_id:
+            from handlers.check import remember_media_group_message
+
+            remember_media_group_message(message)
+            return
+
+        if message.caption:
+            from handlers.check import get_message_media, process_text_check
+
+            media_item = get_message_media(message)
+            await process_text_check(
+                requester_message=message,
+                text=message.caption,
+                media=[media_item] if media_item else None,
+                media_group_id=message.media_group_id,
+            )
+            return
+
         await message.answer(
             "<b>Зображення поки що не аналізуються</b>\n\n"
-            "Якщо на зображенні є текст новини, надішли його текстом.\n\n"
+            "Якщо медіа має опис із новиною, бот перевірить саме цей опис як текст. "
+            "Якщо новина написана тільки на зображенні, скопіюй її текст і надішли окремим повідомленням.\n\n"
             "Якщо це скріншот підтримки AntiFakeUA, відкрий розділ "
             "<b>«Підтримати»</b> і саме там надішли скріншот ще раз.",
             parse_mode="HTML",
         )
         return
+
+    consume_donation_intent(user.id)
 
     add_user(user_id=user.id, username=user.username, first_name=user.first_name)
     photo = message.photo[-1]

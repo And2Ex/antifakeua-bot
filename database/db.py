@@ -440,12 +440,15 @@ def add_request(
     result: dict | None = None,
     is_publishable: bool = True,
     queue_for_publication: bool = True,
+    media: list[dict] | None = None,
+    media_group_id: str | None = None,
 ) -> str:
     connection = get_connection()
     cursor = connection.cursor()
 
     public_id = generate_public_id()
     result_json = json.dumps(result, ensure_ascii=False) if result is not None else None
+    media_json = json.dumps(media, ensure_ascii=False) if media else None
     publication_status = (
         "pending"
         if is_publishable and queue_for_publication
@@ -470,9 +473,11 @@ def add_request(
             from_cache,
             result_json,
             is_publishable,
-            publication_status
+            publication_status,
+            media_json,
+            media_group_id
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             public_id,
@@ -489,6 +494,8 @@ def add_request(
             result_json,
             is_publishable,
             publication_status,
+            media_json,
+            media_group_id,
         )
     )
 
@@ -539,7 +546,8 @@ def get_next_pending_request():
 def update_publication_status(
     public_id: str,
     status: str,
-    published_message_id: int | None = None
+    published_message_id: int | None = None,
+    clear_media: bool = True,
 ) -> bool:
     if status not in REQUEST_STATUSES:
         raise ValueError(f"Невідомий статус публікації: {status}")
@@ -551,10 +559,12 @@ def update_publication_status(
         """
         UPDATE requests
         SET publication_status = %s,
-            published_message_id = %s
+            published_message_id = %s,
+            media_json = CASE WHEN %s THEN NULL ELSE media_json END,
+            media_group_id = CASE WHEN %s THEN NULL ELSE media_group_id END
         WHERE public_id = %s
         """,
-        (status, published_message_id, public_id)
+        (status, published_message_id, clear_media, clear_media, public_id)
     )
 
     changed = cursor.rowcount > 0
@@ -1156,6 +1166,19 @@ def set_donation_intent(user_id: int) -> None:
     )
     connection.commit()
     connection.close()
+
+
+def has_donation_intent(user_id: int) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT user_id FROM donation_intents WHERE user_id = %s",
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    connection.close()
+
+    return row is not None
 
 
 def consume_donation_intent(user_id: int) -> bool:

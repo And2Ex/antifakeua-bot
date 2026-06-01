@@ -1,3 +1,4 @@
+import asyncio
 from html import escape
 
 from aiogram import F, Router
@@ -28,6 +29,66 @@ from services.utils import generate_text_hash, is_meaningful_text, normalize_tex
 router = Router()
 
 NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
+MEDIA_GROUP_DELAY_SECONDS = 1.2
+MEDIA_GROUPS: dict[str, dict] = {}
+
+
+def get_message_media(message: Message) -> dict | None:
+    if message.photo:
+        photo = message.photo[-1]
+
+        return {
+            "type": "photo",
+            "file_id": photo.file_id,
+            "file_unique_id": photo.file_unique_id,
+        }
+
+    if message.video:
+        return {
+            "type": "video",
+            "file_id": message.video.file_id,
+            "file_unique_id": message.video.file_unique_id,
+        }
+
+    if message.animation:
+        return {
+            "type": "animation",
+            "file_id": message.animation.file_id,
+            "file_unique_id": message.animation.file_unique_id,
+        }
+
+    if message.document:
+        return {
+            "type": "document",
+            "file_id": message.document.file_id,
+            "file_unique_id": message.document.file_unique_id,
+            "file_name": message.document.file_name,
+        }
+
+    return None
+
+
+def merge_media_items(items: list[dict]) -> list[dict]:
+    unique_items = []
+    seen = set()
+
+    for item in items:
+        key = item.get("file_unique_id") or item.get("file_id")
+
+        if not key or key in seen:
+            continue
+
+        unique_items.append(item)
+        seen.add(key)
+
+    return unique_items
+
+
+def get_media_group_key(message: Message) -> str | None:
+    if not message.media_group_id:
+        return None
+
+    return f"{message.chat.id}:{message.media_group_id}"
 
 
 def get_message_text(message: Message) -> str | None:
@@ -227,7 +288,9 @@ async def send_final_response(
 async def process_text_check(
     requester_message: Message,
     text: str,
-    source_message: Message | None = None
+    source_message: Message | None = None,
+    media: list[dict] | None = None,
+    media_group_id: str | None = None,
 ):
     source_message = source_message or requester_message
     user = requester_message.from_user
@@ -295,6 +358,8 @@ async def process_text_check(
             from_cache=True,
             result=cached_analysis,
             is_publishable=bool(cached_analysis.get("public_mark_allowed", False)),
+            media=media,
+            media_group_id=media_group_id,
         )
 
         record_detected_sources(
@@ -375,6 +440,8 @@ async def process_text_check(
         from_cache=False,
         result=result,
         is_publishable=bool(result.get("public_mark_allowed", False)),
+        media=media,
+        media_group_id=media_group_id,
     )
 
     record_detected_sources(
@@ -407,16 +474,82 @@ async def process_text_check(
     )
 
 
+
+
+async def process_media_group_later(group_key: str):
+    await asyncio.sleep(MEDIA_GROUP_DELAY_SECONDS)
+
+    group = MEDIA_GROUPS.pop(group_key, None)
+
+    if not group:
+        return
+
+    text = group.get("caption")
+    requester_message = group.get("message")
+
+    if not text or requester_message is None:
+        return
+
+    await process_text_check(
+        requester_message=requester_message,
+        source_message=requester_message,
+        text=text,
+        media=merge_media_items(group.get("media", [])),
+        media_group_id=str(group.get("media_group_id") or ""),
+    )
+
+
+def remember_media_group_message(message: Message) -> bool:
+    group_key = get_media_group_key(message)
+
+    if not group_key:
+        return False
+
+    group = MEDIA_GROUPS.setdefault(
+        group_key,
+        {
+            "caption": None,
+            "message": None,
+            "media": [],
+            "media_group_id": message.media_group_id,
+            "task": None,
+        },
+    )
+
+    media_item = get_message_media(message)
+
+    if media_item:
+        group["media"].append(media_item)
+
+    if message.caption:
+        group["caption"] = message.caption
+        group["message"] = message
+
+    task = group.get("task")
+
+    if task is not None and not task.done():
+        task.cancel()
+
+    group["task"] = asyncio.create_task(process_media_group_later(group_key))
+
+    return True
+
+
 @router.message(Command("check"))
 async def check_command_handler(message: Message):
     if message.reply_to_message:
         replied_text = get_message_text(message.reply_to_message)
 
         if replied_text:
+            media_item = get_message_media(message.reply_to_message)
+            media = [media_item] if media_item else None
+
             await process_text_check(
                 requester_message=message,
                 source_message=message.reply_to_message,
-                text=replied_text
+                text=replied_text,
+                media=media,
+                media_group_id=message.reply_to_message.media_group_id,
             )
             return
 
@@ -444,14 +577,22 @@ async def check_text_or_caption_handler(message: Message):
     if message.chat.type != "private":
         return
 
+    if message.media_group_id and remember_media_group_message(message):
+        return
+
     text = get_message_text(message)
 
     if not text:
         return
 
+    media_item = get_message_media(message)
+    media = [media_item] if media_item else None
+
     await process_text_check(
         requester_message=message,
-        text=text
+        text=text,
+        media=media,
+        media_group_id=message.media_group_id,
     )
 
 
@@ -460,9 +601,13 @@ async def media_without_text_handler(message: Message):
     if message.chat.type != "private":
         return
 
+    if message.media_group_id and remember_media_group_message(message):
+        return
+
     await message.answer(
         "<b>Зображення та відео поки що не аналізуються</b>\n\n"
-        "Якщо матеріал містить текст новини, надішли його текстом.\n\n"
+        "Якщо медіа має опис із новиною, бот перевірить саме цей опис як текст. "
+        "Якщо новина написана тільки на зображенні або у відео, скопіюй її текст і надішли окремим повідомленням.\n\n"
         "Для підтвердження підтримки через Monobank відкрий розділ "
         "<b>«Підтримати»</b> і саме там надішли скріншот переказу.",
         parse_mode="HTML",

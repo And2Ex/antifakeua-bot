@@ -15,7 +15,6 @@ SCHEMA_PATH = BASE_DIR / "database" / "schema.sql"
 REQUEST_STATUSES = {"pending", "published", "skipped", "rejected", "quickcheck"}
 SUCCESS_PAYMENT_STATUSES = {"success", "sandbox"}
 CHANNEL_MODES = {"manual", "auto"}
-V042_FREE_LIMIT_MIGRATION_KEY = "migration_v042_free_limit_to_configured_value"
 
 
 def get_connection():
@@ -39,42 +38,6 @@ def init_db() -> None:
         with connection.cursor() as cursor:
             for statement in statements:
                 cursor.execute(statement)
-
-            _apply_v042_free_limit_migration(cursor)
-
-
-def _apply_v042_free_limit_migration(cursor) -> None:
-    """Move accounts that still use the former default quota to the new default once."""
-    cursor.execute(
-        "SELECT value FROM app_settings WHERE key = %s",
-        (V042_FREE_LIMIT_MIGRATION_KEY,),
-    )
-
-    migration = cursor.fetchone()
-
-    if migration is not None and migration["value"] == str(FREE_TEXT_LIMIT):
-        return
-
-    cursor.execute(
-        """
-        UPDATE users
-        SET texts_limit = %s,
-            free_limit = %s,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE texts_limit = 30 AND free_limit = 30
-        """,
-        (FREE_TEXT_LIMIT, FREE_TEXT_LIMIT),
-    )
-    cursor.execute(
-        """
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (%s, %s, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = CURRENT_TIMESTAMP
-        """,
-        (V042_FREE_LIMIT_MIGRATION_KEY, str(FREE_TEXT_LIMIT)),
-    )
 
 
 def check_database_connection() -> dict:
@@ -363,7 +326,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         "<b>Ліміт безкоштовних перевірок вичерпано</b>\n\n"
         f"<b>Безкоштовні перевірки:</b> {free_used}/{free_limit}\n"
         "<b>Додатковий ліміт:</b> 0\n\n"
-        "Додаткові перевірки можуть бути надані користувачам, які підтримали AntiFakeUA. Відкрий розділ нижче, щоб передати підтвердження підтримки."
+        "Підтримати AntiFakeUA добровільним переказом і отримати додатковий ліміт можна через розділ нижче."
     )
 
 

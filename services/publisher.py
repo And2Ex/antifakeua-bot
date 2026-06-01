@@ -60,7 +60,7 @@ def get_saved_publication(request) -> dict | None:
 
 
 def build_source_reference(request) -> str | None:
-    """Return the original source as a bold linked name with a news marker."""
+    """Return the original publication source as a linked name, without a label."""
     source_title = (request.get("source_title") or "").strip()
     source_link = (request.get("source_link") or "").strip()
 
@@ -68,9 +68,9 @@ def build_source_reference(request) -> str | None:
         return None
 
     if source_link:
-        return f'📰 <b><a href="{escape(source_link, quote=True)}">{escape_html(source_title)}</a></b>'
+        return f'<a href="{escape(source_link, quote=True)}">{escape_html(source_title)}</a>'
 
-    return f'📰 <b>{escape_html(source_title)}</b>'
+    return escape_html(source_title)
 
 
 def get_saved_media(request) -> list[dict]:

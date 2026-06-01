@@ -2,6 +2,7 @@ import asyncio
 from html import escape
 
 from aiogram import F, Router
+from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
@@ -148,23 +149,56 @@ async def delete_later(message: Message | None, delay: float = CONTROL_DELETE_SE
         return
 
 
+async def get_chat_member_safely(message_or_callback, chat_id: int, user_id: int):
+    try:
+        return await message_or_callback.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+    except Exception as error:
+        print(
+            "QUICKCHECK MEMBER LOOKUP ERROR: "
+            f"chat_id={chat_id}, user_id={user_id}, "
+            f"{type(error).__name__}: {error}"
+        )
+        return None
+
+
+def is_administrator_status(status) -> bool:
+    return status in {
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.CREATOR,
+        "administrator",
+        "creator",
+    }
+
+
 async def user_is_chat_admin(message_or_callback, chat_id: int, user_id: int) -> bool:
+    member = await get_chat_member_safely(message_or_callback, chat_id, user_id)
+    return member is not None and is_administrator_status(member.status)
+
+
+async def bot_is_chat_admin(message_or_callback, chat_id: int) -> bool:
     try:
-        member = await message_or_callback.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-    except Exception:
+        bot_info = await message_or_callback.bot.get_me()
+    except Exception as error:
+        print(f"QUICKCHECK BOT LOOKUP ERROR: {type(error).__name__}: {error}")
         return False
 
-    return str(member.status) in {"administrator", "creator", "ChatMemberStatus.ADMINISTRATOR", "ChatMemberStatus.CREATOR"}
+    member = await get_chat_member_safely(message_or_callback, chat_id, bot_info.id)
+    return member is not None and is_administrator_status(member.status)
 
 
-async def bot_can_post_to_channel(message: Message, chat_id: int) -> bool:
+async def bot_can_post_to_channel(message_or_callback, chat_id: int) -> bool:
     try:
-        bot_info = await message.bot.get_me()
-        member = await message.bot.get_chat_member(chat_id=chat_id, user_id=bot_info.id)
-    except Exception:
+        bot_info = await message_or_callback.bot.get_me()
+    except Exception as error:
+        print(f"QUICKCHECK BOT LOOKUP ERROR: {type(error).__name__}: {error}")
         return False
 
-    return str(member.status) in {"administrator", "ChatMemberStatus.ADMINISTRATOR"} and bool(getattr(member, "can_post_messages", False))
+    member = await get_chat_member_safely(message_or_callback, chat_id, bot_info.id)
+    return (
+        member is not None
+        and is_administrator_status(member.status)
+        and bool(getattr(member, "can_post_messages", False))
+    )
 
 
 async def show_channel_settings(message: Message, chat_id: int, chat_title: str, chat_type: str, user_id: int) -> None:
@@ -219,8 +253,16 @@ async def quickcheck_settings_handler(message: Message):
     if message.chat.type not in {"group", "supergroup"}:
         return
 
+    if not await bot_is_chat_admin(message, message.chat.id):
+        await message.answer(
+            "Спочатку додай бота адміністратором цієї групи. "
+            "Це потрібно, щоб бот міг підтвердити права адміністратора "
+            "та бачити нові повідомлення для автоматичної перевірки."
+        )
+        return
+
     if not await user_is_chat_admin(message, message.chat.id, user.id):
-        await message.answer("Цю настройку може змінювати лише адміністратор чату.")
+        await message.answer("Це налаштування може змінювати лише адміністратор цієї групи.")
         return
 
     PENDING_GROUP_COMMANDS[(message.chat.id, user.id)] = message.message_id
@@ -241,16 +283,20 @@ async def selected_channel_handler(message: Message):
     if shared is None or shared.request_id != CHANNEL_REQUEST_ID or user is None:
         return
 
-    if not await user_is_chat_admin(message, shared.chat_id, user.id):
+    # Спершу перевіряємо права самого бота. Telegram гарантує коректну
+    # перевірку адміністратора через getChatMember лише тоді, коли бот
+    # є адміністратором цього ж каналу.
+    if not await bot_can_post_to_channel(message, shared.chat_id):
         await message.answer(
-            "Не вдалося підтвердити права адміністратора для цього каналу.",
+            "Спочатку додай бота адміністратором цього каналу та дозволь "
+            "йому публікувати повідомлення. Після цього обери канал ще раз.",
             reply_markup=ReplyKeyboardRemove(),
         )
         return
 
-    if not await bot_can_post_to_channel(message, shared.chat_id):
+    if not await user_is_chat_admin(message, shared.chat_id, user.id):
         await message.answer(
-            "Боту потрібні права адміністратора каналу з дозволом публікувати повідомлення.",
+            "Не вдалося підтвердити, що ти є адміністратором цього каналу.",
             reply_markup=ReplyKeyboardRemove(),
         )
         return
@@ -279,14 +325,28 @@ async def toggle_channel_quickcheck(callback: CallbackQuery):
         await callback.answer("Невідомий режим.", show_alert=True)
         return
 
-    if not await user_is_chat_admin(callback, chat_id, callback.from_user.id):
-        await callback.answer("Недостатньо прав для цього каналу.", show_alert=True)
-        return
-
     setting = get_channel_setting(chat_id)
 
     if setting is None:
         await callback.answer("Спочатку обери канал заново.", show_alert=True)
+        return
+
+    if setting["chat_type"] == "channel":
+        if not await bot_can_post_to_channel(callback, chat_id):
+            await callback.answer(
+                "Бот більше не має права публікувати в цьому каналі.",
+                show_alert=True,
+            )
+            return
+    elif not await bot_is_chat_admin(callback, chat_id):
+        await callback.answer(
+            "Бот має бути адміністратором цієї групи.",
+            show_alert=True,
+        )
+        return
+
+    if not await user_is_chat_admin(callback, chat_id, callback.from_user.id):
+        await callback.answer("Недостатньо прав адміністратора.", show_alert=True)
         return
 
     set_channel_mode(chat_id, new_mode, callback.from_user.id)

@@ -6,6 +6,7 @@ from aiogram.types import LinkPreviewOptions, Message, ReplyParameters
 
 from database.db import add_request, add_user, get_connection, get_user, remember_content
 from services.admin_notifications import notify_check_completed, notify_new_user
+from keyboards.support import SUPPORT_ENTRY_KEYBOARD
 from services.cache import get_cached_response, save_cached_response
 from services.formatter import (
     extract_verdict_from_result,
@@ -329,7 +330,11 @@ async def process_text_check(
     limit_allowed, limit_message = check_and_use_text_limit(user.id)
 
     if not limit_allowed:
-        await requester_message.answer(limit_message, parse_mode="HTML")
+        await requester_message.answer(
+            limit_message,
+            parse_mode="HTML",
+            reply_markup=SUPPORT_ENTRY_KEYBOARD,
+        )
         return
 
     status_message = await requester_message.answer(
@@ -452,7 +457,13 @@ async def check_text_or_caption_handler(message: Message):
 
 @router.message(F.photo | F.video | F.document | F.animation)
 async def media_without_text_handler(message: Message):
-    # Порожні медіа-повідомлення мовчки ігноруємо.
-    # У Telegram альбоми та переслані дописи можуть приходити кількома update-ами,
-    # і відповідь на кожен порожній update створює спам у чаті.
-    return
+    if message.chat.type != "private":
+        return
+
+    await message.answer(
+        "<b>Зображення та відео поки що не аналізуються</b>\n\n"
+        "Якщо матеріал містить текст новини, надішли його текстом.\n\n"
+        "Для підтвердження підтримки через Monobank спочатку відкрий "
+        "розділ <code>/support</code>, а потім надішли скріншот переказу.",
+        parse_mode="HTML",
+    )

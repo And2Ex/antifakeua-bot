@@ -11,7 +11,7 @@ def get_main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(text="📊 Мої ліміти", callback_data="menu:limits"),
-            InlineKeyboardButton(text="💳 Купити перевірки", callback_data="buy_menu"),
+            InlineKeyboardButton(text="💙 Підтримати", callback_data="support:open"),
         ],
         [
             InlineKeyboardButton(text="🌐 Репутація джерела", callback_data="menu:source"),

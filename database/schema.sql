@@ -215,3 +215,30 @@ ALTER TABLE quick_checks ADD COLUMN IF NOT EXISTS public_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_quick_checks_created_at ON quick_checks(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_quick_checks_public_id ON quick_checks(public_id);
 
+
+CREATE TABLE IF NOT EXISTS donation_intents (
+    user_id BIGINT PRIMARY KEY,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS donation_submissions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    username TEXT,
+    first_name TEXT,
+    file_id TEXT NOT NULL,
+    file_unique_id TEXT,
+    caption TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    checks_added INTEGER,
+    reviewed_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TIMESTAMPTZ,
+    CONSTRAINT donation_submissions_status_check CHECK (status IN ('pending', 'approved', 'rejected'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_donation_submissions_user_id ON donation_submissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_donation_submissions_status ON donation_submissions(status);
+CREATE INDEX IF NOT EXISTS idx_donation_submissions_created_at ON donation_submissions(created_at DESC);

@@ -12,7 +12,7 @@ async def setup_bot_commands(bot):
     private_commands = [
         BotCommand(command="start", description="головне меню"),
         BotCommand(command="quickcheck", description="автоперевірка для мого каналу"),
-        BotCommand(command="buy", description="купити перевірки"),
+        BotCommand(command="support", description="підтримати проєкт"),
         BotCommand(command="limits", description="мій баланс перевірок"),
     ]
 

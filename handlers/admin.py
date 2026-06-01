@@ -7,6 +7,11 @@ from aiogram.types import CallbackQuery, Message
 from config import ADMIN_IDS
 from database.db import (
     admin_add_paid_balance,
+    approve_donation_and_add_balance,
+    approve_latest_pending_donation_for_user,
+    get_donation_stats,
+    get_donation_submission,
+    get_recent_donation_submissions,
     is_admin_notifications_enabled,
     get_basic_stats,
     get_chat_source_stats,
@@ -74,9 +79,10 @@ async def send_stats(message: Message) -> None:
         for row in stats["publication_stats"]
     ]
 
-    payment_lines = [
+    donation_stats = get_donation_stats()
+    donation_lines = [
         f"{row['status']}: {row['count']}"
-        for row in stats["payment_status_stats"]
+        for row in donation_stats["status_stats"]
     ]
 
     quick_check_lines = [
@@ -86,7 +92,7 @@ async def send_stats(message: Message) -> None:
 
     verdict_text = "\n".join(verdict_lines) if verdict_lines else "ще немає даних"
     publication_text = "\n".join(publication_lines) if publication_lines else "ще немає даних"
-    payment_text = "\n".join(payment_lines) if payment_lines else "ще немає даних"
+    donation_text = "\n".join(donation_lines) if donation_lines else "ще немає даних"
     quick_check_text = "\n".join(quick_check_lines) if quick_check_lines else "ще немає даних"
 
     await message.answer(
@@ -95,7 +101,7 @@ async def send_stats(message: Message) -> None:
         f"Запитів: {stats['requests_count']}\n"
         f"Кешованих відповідей: {stats['cache_count']}\n"
         f"Відгуків: {stats['feedback_count']}\n"
-        f"Платежів: {stats['payments_count']}\n"
+        f"Заявок підтримки: {donation_stats['submissions_count']}\n"
         f"Каналів з авто-QuickCheck: {stats['automatic_channels_count']}\n"
         f"Коротких перевірок: {stats['quick_checks_count']}\n\n"
         "<b>Вердикти:</b>\n"
@@ -104,30 +110,41 @@ async def send_stats(message: Message) -> None:
         f"{escape(publication_text)}\n\n"
         "<b>QuickCheck:</b>\n"
         f"{escape(quick_check_text)}\n\n"
-        "<b>Платежі:</b>\n"
-        f"{escape(payment_text)}",
+        "<b>Підтримка:</b>\n"
+        f"{escape(donation_text)}",
         parse_mode="HTML",
         reply_markup=ADMIN_BACK_KEYBOARD,
     )
 
 
-async def send_payment_stats(message: Message) -> None:
-    stats = get_payment_stats()
-
+async def send_donation_stats(message: Message) -> None:
+    stats = get_donation_stats()
+    submissions = get_recent_donation_submissions(limit=10)
     status_lines = [
         f"{row['status']}: {row['count']}"
         for row in stats["status_stats"]
     ]
+    parts = [
+        "💙 <b>Підтримка й додаткові ліміти</b>",
+        "",
+        f"Усього скріншотів: {stats['submissions_count']}",
+        f"Надано додаткових перевірок: {stats['checks_total']}",
+        "",
+        "<b>Статуси:</b>",
+        escape("\n".join(status_lines) if status_lines else "ще немає даних"),
+    ]
 
-    status_text = "\n".join(status_lines) if status_lines else "ще немає даних"
+    if submissions:
+        parts.extend(["", "<b>Останні заявки:</b>"])
+
+        for item in submissions:
+            parts.append(
+                f"#{item['id']} · user_id=<code>{item['user_id']}</code> · "
+                f"{escape(item['status'])} · +{item['checks_added'] or 0}"
+            )
 
     await message.answer(
-        "💳 <b>Статистика оплат</b>\n\n"
-        f"Усього платежів: {stats['payments_count']}\n"
-        f"Оплачених перевірок: {stats['paid_checks_total']}\n"
-        f"Сума успішних оплат: {stats['paid_amount_total']:.2f} UAH\n\n"
-        "<b>Статуси:</b>\n"
-        f"{escape(status_text)}",
+        "\n".join(parts),
         parse_mode="HTML",
         reply_markup=ADMIN_BACK_KEYBOARD,
     )
@@ -243,7 +260,7 @@ async def send_notifications_settings(message: Message) -> None:
         "• нових користувачів;\n"
         "• додавання бота в групи;\n"
         "• нові перевірки;\n"
-        "• активацію пакетів перевірок.\n\n"
+        "• заявки підтримки й надання додаткових лімітів.\n\n"
         "Якщо користувачів стане багато, їх можна вимкнути цією кнопкою.",
         parse_mode="HTML",
         reply_markup=build_admin_notifications_keyboard(enabled),
@@ -289,21 +306,21 @@ async def stats_callback(callback: CallbackQuery):
     await send_stats(callback.message)
 
 
-@router.message(Command("paymentstats"))
-async def payment_stats_handler(message: Message):
+@router.message(Command("donations"))
+async def donation_stats_handler(message: Message):
     if not await require_admin_message(message):
         return
 
-    await send_payment_stats(message)
+    await send_donation_stats(message)
 
 
-@router.callback_query(F.data == "admin:payments")
-async def payment_stats_callback(callback: CallbackQuery):
+@router.callback_query(F.data == "admin:donations")
+async def donation_stats_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
         return
 
     await callback.answer()
-    await send_payment_stats(callback.message)
+    await send_donation_stats(callback.message)
 
 
 @router.message(Command("sourcestats"))
@@ -415,7 +432,7 @@ async def reset_limits_handler(message: Message):
         return
 
     reset_user_limits(user_id)
-    await message.answer(f"Ліміт користувача {user_id} скинуто разом із платним балансом.")
+    await message.answer(f"Ліміт користувача {user_id} скинуто разом із додатковим балансом.")
 
 
 @router.message(Command("setlimit"))
@@ -515,6 +532,7 @@ async def payment_debug_handler(message: Message):
 
 
 @router.message(Command("addbalance"))
+@router.message(Command("grant"))
 async def add_balance_handler(message: Message):
     if not await require_admin_message(message):
         return
@@ -525,7 +543,7 @@ async def add_balance_handler(message: Message):
         await message.answer(
             "Неправильний формат.\n\n"
             "Приклад:\n"
-            "/addbalance 486192692 100"
+            "/grant 486192692 100"
         )
         return
 
@@ -542,7 +560,117 @@ async def add_balance_handler(message: Message):
         await message.answer("Не вдалося додати баланс.")
         return
 
-    await message.answer(f"Користувачу {user_id} додано {checks} платних перевірок.")
+    approve_latest_pending_donation_for_user(
+        user_id=user_id,
+        reviewed_by=message.from_user.id,
+        checks_added=checks,
+    )
+
+    await message.answer(f"Користувачу {user_id} додано {checks} додаткових перевірок.")
+
+    try:
+        await message.bot.send_message(
+            chat_id=user_id,
+            text=(
+                "💙 <b>Дякуємо за підтримку AntiFakeUA</b>\n\n"
+                f"Вам надано додатковий ліміт: <b>{checks} перевірок</b>.\n\n"
+                "Поточний баланс можна переглянути командою <code>/limits</code>."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("donation:grant:"))
+async def donation_grant_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    try:
+        _, _, raw_submission_id, raw_checks = callback.data.split(":", 3)
+        submission_id = int(raw_submission_id)
+        checks = int(raw_checks)
+    except (ValueError, AttributeError):
+        await callback.answer("Некоректна заявка.", show_alert=True)
+        return
+
+    submission = approve_donation_and_add_balance(
+        submission_id=submission_id,
+        reviewed_by=callback.from_user.id,
+        checks_added=checks,
+    )
+
+    if submission is None:
+        await callback.answer("Заявку вже оброблено або не знайдено.", show_alert=True)
+        return
+
+    await callback.answer("Додатковий ліміт надано.")
+    await callback.message.edit_caption(
+        caption=(
+            "✅ <b>Підтримку підтверджено</b>\n\n"
+            f"Користувач: <code>{submission['user_id']}</code>\n"
+            f"Надано: <b>+{checks} перевірок</b>"
+        ),
+        parse_mode="HTML",
+    )
+
+    try:
+        await callback.bot.send_message(
+            chat_id=submission["user_id"],
+            text=(
+                "💙 <b>Дякуємо за підтримку AntiFakeUA</b>\n\n"
+                f"Вам надано додатковий ліміт: <b>{checks} перевірок</b>.\n\n"
+                "Поточний баланс можна переглянути командою <code>/limits</code>."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("donation:reject:"))
+async def donation_reject_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    try:
+        submission_id = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, AttributeError):
+        await callback.answer("Некоректна заявка.", show_alert=True)
+        return
+
+    submission = get_donation_submission(submission_id)
+
+    if submission is None or not update_donation_submission(
+        submission_id=submission_id,
+        status="rejected",
+        reviewed_by=callback.from_user.id,
+    ):
+        await callback.answer("Заявку вже оброблено або не знайдено.", show_alert=True)
+        return
+
+    await callback.answer("Заявку відхилено.")
+    await callback.message.edit_caption(
+        caption=(
+            "❌ <b>Скріншот не підтверджено</b>\n\n"
+            f"Користувач: <code>{submission['user_id']}</code>"
+        ),
+        parse_mode="HTML",
+    )
+
+    try:
+        await callback.bot.send_message(
+            chat_id=submission["user_id"],
+            text=(
+                "Не вдалося підтвердити скріншот підтримки. "
+                "Надішліть коректний скріншот переказу через <code>/support</code> "
+                "або зверніться через розділ відгуку."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "admin:commands")
@@ -554,8 +682,7 @@ async def admin_commands_callback(callback: CallbackQuery):
     await callback.message.answer(
         "🧰 <b>Технічні адмін-команди</b>\n\n"
         "Вони не показуються в меню Telegram, але працюють вручну:\n\n"
-        "<code>/paymentdebug ORDER_ID</code> — діагностика платежу\n"
-        "<code>/addbalance USER_ID 100</code> — додати баланс\n"
+        "<code>/grant USER_ID 100</code> — надати додатковий ліміт після підтримки\n"
         "<code>/setlimit USER_ID 100</code> — встановити free-ліміт\n"
         "<code>/resetlimits USER_ID</code> — скинути ліміти користувача\n"
         "<code>/publish check_xxxxx</code> — опублікувати перевірку за ID\n"

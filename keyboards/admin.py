@@ -8,8 +8,7 @@ ADMIN_PANEL_KEYBOARD = InlineKeyboardMarkup(
             InlineKeyboardButton(text="🌐 Джерела", callback_data="admin:sources"),
         ],
         [
-            InlineKeyboardButton(text="💳 Оплати", callback_data="admin:payments"),
-            InlineKeyboardButton(text="🧾 Останні платежі", callback_data="admin:payments_recent"),
+            InlineKeyboardButton(text="💙 Підтримка", callback_data="admin:donations"),
         ],
         [
             InlineKeyboardButton(text="✉️ Відгуки", callback_data="admin:feedback"),

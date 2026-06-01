@@ -1,140 +1,105 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import (
-    CallbackQuery,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    Message,
-)
+from aiogram.types import CallbackQuery, Message
 
-from database.db import add_user, create_payment
-from services.payments import (
-    PAYMENT_PACKAGES,
-    create_checkout_url,
-    format_package_price,
-    get_package,
-    get_packages_text,
+from config import DONATION_SCREENSHOT_WINDOW_HOURS
+from database.db import (
+    add_user,
+    consume_donation_intent,
+    create_donation_submission,
+    set_donation_intent,
 )
+from keyboards.support import build_support_keyboard
+from services.admin_notifications import notify_donation_screenshot
 
 
 router = Router()
 
 
-def build_buy_keyboard() -> InlineKeyboardMarkup:
-    buttons = []
-
-    for package_id, package in PAYMENT_PACKAGES.items():
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{package['title']} — {package['checks']} перевірок • {package['amount']:.0f} грн",
-                callback_data=f"buy:{package_id}",
-            )
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def build_payment_text(package: dict) -> str:
-    lines = [
-        "<b>Пакет готовий до активації</b>",
-        "",
-        f"<b>Пакет:</b> {package['title']}",
-        f"<b>Перевірок:</b> {package['checks']}",
-        f"<b>Ціна:</b> {format_package_price(package)}",
-        "",
-        "Натисни кнопку нижче, щоб перейти до підтвердження через LiqPay. Після успішного підтвердження перевірки автоматично додадуться до твого балансу.",
-    ]
-
-    return "\n".join(lines)
+SUPPORT_TEXT = (
+    "💙 <b>Підтримати AntiFakeUA</b>\n\n"
+    "AntiFakeUA має безкоштовний ліміт перевірок для всіх користувачів. "
+    "Підтримати розвиток проєкту можна добровільним переказом на банку Monobank.\n\n"
+    "Після підтримки адміністратор може вручну надати додатковий ліміт перевірок як подяку. "
+    "Сума підтримки довільна, а додатковий ліміт визначається після перевірки переказу.\n\n"
+    "<b>Як підтвердити підтримку:</b>\n"
+    "1. Відкрий банку кнопкою нижче й зроби переказ.\n"
+    "2. Надішли в цей чат скріншот переказу.\n"
+    "3. Після перевірки ти отримаєш повідомлення про наданий додатковий ліміт.\n\n"
+    f"<i>Скріншот очікуватиметься протягом {DONATION_SCREENSHOT_WINDOW_HOURS} годин після відкриття цього розділу.</i>"
+)
 
 
-@router.message(Command("buy"))
-async def buy_handler(message: Message):
+async def show_support_menu(message: Message) -> None:
     user = message.from_user
 
-    add_user(
+    if user is None:
+        return
+
+    add_user(user_id=user.id, username=user.username, first_name=user.first_name)
+    set_donation_intent(user.id, hours=DONATION_SCREENSHOT_WINDOW_HOURS)
+
+    await message.answer(
+        SUPPORT_TEXT,
+        parse_mode="HTML",
+        reply_markup=build_support_keyboard(),
+        disable_notification=True,
+    )
+
+
+@router.message(Command("support", "buy"))
+async def support_handler(message: Message):
+    await show_support_menu(message)
+
+
+@router.callback_query(F.data.in_({"support:open", "buy_menu"}))
+async def support_menu_callback(callback: CallbackQuery):
+    await callback.answer()
+    await show_support_menu(callback.message)
+
+
+@router.message(F.chat.type == "private", F.photo)
+async def donation_screenshot_handler(message: Message):
+    user = message.from_user
+
+    if user is None:
+        return
+
+    if not consume_donation_intent(user.id):
+        await message.answer(
+            "<b>Зображення поки що не аналізуються</b>\n\n"
+            "Якщо на зображенні є текст новини, надішли його текстом.\n\n"
+            "Якщо це скріншот підтримки AntiFakeUA, спочатку відкрий розділ "
+            "<code>/support</code>, а потім надішли скріншот ще раз.",
+            parse_mode="HTML",
+        )
+        return
+
+    add_user(user_id=user.id, username=user.username, first_name=user.first_name)
+    photo = message.photo[-1]
+    submission_id = create_donation_submission(
         user_id=user.id,
         username=user.username,
         first_name=user.first_name,
+        file_id=photo.file_id,
+        file_unique_id=photo.file_unique_id,
+        caption=message.caption,
     )
 
     await message.answer(
-        get_packages_text(),
+        "💙 <b>Дякуємо за підтримку AntiFakeUA</b>\n\n"
+        "Скріншот отримано. Після перевірки переказу адміністратор вручну надасть додатковий ліміт перевірок.\n\n"
+        "Коли ліміт буде додано, ти отримаєш окреме повідомлення тут у боті.",
         parse_mode="HTML",
-        reply_markup=build_buy_keyboard(),
     )
 
-
-@router.callback_query(F.data == "buy_menu")
-async def buy_menu_callback(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.answer(
-        get_packages_text(),
-        parse_mode="HTML",
-        reply_markup=build_buy_keyboard(),
-    )
-
-
-@router.callback_query(F.data.startswith("buy:"))
-async def buy_package_callback(callback: CallbackQuery):
-    if callback.data == "buy:menu":
-        await callback.answer()
-        await callback.message.answer(
-            get_packages_text(),
-            parse_mode="HTML",
-            reply_markup=build_buy_keyboard(),
-        )
-        return
-
-    package_id = callback.data.split(":", 1)[1]
-    package = get_package(package_id)
-
-    if package is None:
-        await callback.answer("Пакет не знайдено.", show_alert=True)
-        return
-
-    await callback.answer("Готую платіж…")
-    user = callback.from_user
-
-    add_user(
+    await notify_donation_screenshot(
+        message.bot,
+        submission_id=submission_id,
         user_id=user.id,
         username=user.username,
         first_name=user.first_name,
-    )
-
-    order_id = create_payment(
-        user_id=user.id,
-        package_id=package_id,
-        package_title=package["title"],
-        checks_added=package["checks"],
-        amount=package["amount"],
-        currency=package["currency"],
-    )
-
-    try:
-        payment_url = create_checkout_url(order_id, package)
-    except ValueError as error:
-        await callback.message.answer(
-            "<b>Оплата тимчасово недоступна</b>\n\n"
-            "Не вдалося створити платіжне посилання. Спробуй пізніше або напиши через розділ <b>Відгук</b>.\n\n"
-            f"<i>Технічна причина: {error}</i>",
-            parse_mode="HTML",
-        )
-        return
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Оплатити через LiqPay",
-                    url=payment_url,
-                )
-            ]
-        ]
-    )
-
-    await callback.message.answer(
-        build_payment_text(package),
-        parse_mode="HTML",
-        reply_markup=keyboard,
+        photo_file_id=photo.file_id,
     )

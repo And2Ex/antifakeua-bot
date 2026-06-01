@@ -1,6 +1,6 @@
 import json
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg
@@ -287,7 +287,10 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         remaining_free = free_limit - (free_used + 1)
 
         if paid_balance == 0 and remaining_free <= 3:
-            return True, f"<b>Залишилось безкоштовних перевірок:</b> {remaining_free}\nДодатковий пакет можна активувати командою <code>/buy</code>."
+            return True, (
+                f"<b>Залишилось безкоштовних перевірок:</b> {remaining_free}\n"
+                "Підтримати проєкт і отримати додатковий ліміт можна через <code>/support</code>."
+            )
 
         return True, ""
 
@@ -309,7 +312,10 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         remaining_paid = paid_balance - 1
 
         if remaining_paid <= 3:
-            return True, f"<b>Залишилось платних перевірок:</b> {remaining_paid}\nПоповнити баланс можна командою <code>/buy</code>."
+            return True, (
+                f"<b>Залишилось додаткових перевірок:</b> {remaining_paid}\n"
+                "Підтримати проєкт і отримати новий додатковий ліміт можна через <code>/support</code>."
+            )
 
         return True, ""
 
@@ -317,10 +323,10 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
 
     return (
         False,
-        "<b>Ліміт перевірок вичерпано</b>\n\n"
+        "<b>Ліміт безкоштовних перевірок вичерпано</b>\n\n"
         f"<b>Безкоштовні перевірки:</b> {free_used}/{free_limit}\n"
-        "<b>Платний баланс:</b> 0\n\n"
-        "Щоб продовжити перевірку, активуй додатковий пакет командою <code>/buy</code>."
+        "<b>Додатковий ліміт:</b> 0\n\n"
+        "Підтримати AntiFakeUA добровільним переказом і отримати додатковий ліміт можна через розділ нижче."
     )
 
 
@@ -1132,6 +1138,268 @@ def get_chat_source_stats():
     connection.close()
 
     return rows
+
+
+def set_donation_intent(user_id: int, hours: int = 24) -> None:
+    safe_hours = max(int(hours), 1)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=safe_hours)
+
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        INSERT INTO donation_intents (user_id, expires_at, updated_at)
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (user_id) DO UPDATE SET
+            expires_at = EXCLUDED.expires_at,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, expires_at),
+    )
+    connection.commit()
+    connection.close()
+
+
+def consume_donation_intent(user_id: int) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        DELETE FROM donation_intents
+        WHERE user_id = %s
+          AND expires_at >= CURRENT_TIMESTAMP
+        RETURNING user_id
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    connection.commit()
+    connection.close()
+
+    return row is not None
+
+
+def create_donation_submission(
+    *,
+    user_id: int,
+    username: str | None,
+    first_name: str | None,
+    file_id: str,
+    file_unique_id: str | None,
+    caption: str | None,
+) -> int:
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        INSERT INTO donation_submissions (
+            user_id, username, first_name, file_id, file_unique_id, caption
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (user_id, username, first_name, file_id, file_unique_id, caption),
+    )
+    submission_id = cursor.fetchone()["id"]
+    connection.commit()
+    connection.close()
+
+    return submission_id
+
+
+def get_donation_submission(submission_id: int):
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT * FROM donation_submissions WHERE id = %s",
+        (submission_id,),
+    )
+    row = cursor.fetchone()
+    connection.close()
+
+    return row
+
+
+def update_donation_submission(
+    *,
+    submission_id: int,
+    status: str,
+    reviewed_by: int,
+    checks_added: int | None = None,
+) -> bool:
+    if status not in {"approved", "rejected"}:
+        raise ValueError("Невідомий статус заявки підтримки")
+
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        UPDATE donation_submissions
+        SET status = %s,
+            reviewed_by = %s,
+            checks_added = %s,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = %s AND status = 'pending'
+        """,
+        (status, reviewed_by, checks_added, submission_id),
+    )
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
+
+
+
+def approve_donation_and_add_balance(
+    *,
+    submission_id: int,
+    reviewed_by: int,
+    checks_added: int,
+):
+    if checks_added <= 0:
+        return None
+
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        SELECT *
+        FROM donation_submissions
+        WHERE id = %s AND status = 'pending'
+        FOR UPDATE
+        """,
+        (submission_id,),
+    )
+    submission = cursor.fetchone()
+
+    if submission is None:
+        connection.close()
+        return None
+
+    cursor.execute(
+        """
+        INSERT INTO users (user_id, texts_limit, free_limit, last_free_reset_month)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (user_id) DO NOTHING
+        """,
+        (submission["user_id"], FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month()),
+    )
+    cursor.execute(
+        """
+        UPDATE users
+        SET paid_balance = paid_balance + %s,
+            plan = 'supported',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = %s
+        """,
+        (checks_added, submission["user_id"]),
+    )
+    cursor.execute(
+        """
+        UPDATE donation_submissions
+        SET status = 'approved',
+            reviewed_by = %s,
+            checks_added = %s,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        """,
+        (reviewed_by, checks_added, submission_id),
+    )
+    connection.commit()
+    connection.close()
+
+    return submission
+
+def approve_latest_pending_donation_for_user(
+    *,
+    user_id: int,
+    reviewed_by: int,
+    checks_added: int,
+) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        SELECT id
+        FROM donation_submissions
+        WHERE user_id = %s AND status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+
+    if row is None:
+        connection.close()
+        return False
+
+    cursor.execute(
+        """
+        UPDATE donation_submissions
+        SET status = 'approved',
+            reviewed_by = %s,
+            checks_added = %s,
+            reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = %s AND status = 'pending'
+        """,
+        (reviewed_by, checks_added, row["id"]),
+    )
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
+
+
+def get_recent_donation_submissions(limit: int = 10):
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+        SELECT id, user_id, username, first_name, status, checks_added, created_at, reviewed_at
+        FROM donation_submissions
+        ORDER BY created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+    rows = cursor.fetchall()
+    connection.close()
+
+    return rows
+
+
+def get_donation_stats() -> dict:
+    connection = get_connection()
+    cursor = connection.cursor()
+    cursor.execute("SELECT COUNT(*) AS count FROM donation_submissions")
+    submissions_count = cursor.fetchone()["count"]
+    cursor.execute(
+        """
+        SELECT status, COUNT(*) AS count
+        FROM donation_submissions
+        GROUP BY status
+        ORDER BY count DESC
+        """
+    )
+    status_stats = cursor.fetchall()
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(checks_added), 0) AS total
+        FROM donation_submissions
+        WHERE status = 'approved'
+        """
+    )
+    checks_total = cursor.fetchone()["total"]
+    connection.close()
+
+    return {
+        "submissions_count": submissions_count,
+        "status_stats": status_stats,
+        "checks_total": checks_total,
+    }
 
 def get_channel_setting(chat_id: int):
     connection = get_connection()

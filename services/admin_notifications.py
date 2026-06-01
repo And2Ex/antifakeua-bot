@@ -1,6 +1,7 @@
 from html import escape
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import ADMIN_IDS
 from database.db import is_admin_notifications_enabled
@@ -92,21 +93,46 @@ async def notify_check_completed(
     )
 
 
-async def notify_payment_credited(
+async def notify_donation_screenshot(
     bot: Bot,
     *,
+    submission_id: int,
     user_id: int,
-    package_title: str,
-    checks_added: int,
-    sandbox: bool,
+    username: str | None,
+    first_name: str | None,
+    photo_file_id: str,
 ) -> None:
-    await notify_admins(
-        bot,
-        "Активовано пакет перевірок",
-        [
-            f"Користувач: <code>{user_id}</code>",
-            f"Пакет: <b>{escape(package_title)}</b>",
-            f"Додано перевірок: <b>{checks_added}</b>",
-            f"Режим: {'sandbox' if sandbox else 'бойова оплата'}",
-        ],
+    if not ADMIN_IDS:
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="+100 перевірок", callback_data=f"donation:grant:{submission_id}:100"),
+                InlineKeyboardButton(text="+1000 перевірок", callback_data=f"donation:grant:{submission_id}:1000"),
+            ],
+            [
+                InlineKeyboardButton(text="Відхилити", callback_data=f"donation:reject:{submission_id}"),
+            ],
+        ]
     )
+    caption = (
+        "💙 <b>Новий скріншот підтримки</b>\n\n"
+        f"Користувач: {format_user_label(user_id, username, first_name)}\n"
+        f"Заявка: <code>#{submission_id}</code>\n\n"
+        "Обери додатковий ліміт або використай команду:\n"
+        f"<code>/grant {user_id} 100</code>"
+    )
+
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_photo(
+                chat_id=admin_id,
+                photo=photo_file_id,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=keyboard,
+                disable_notification=False,
+            )
+        except Exception as error:
+            print(f"DONATION NOTIFY ERROR for {admin_id}: {error}")

@@ -434,6 +434,7 @@ async def process_automatic_post(message: Message) -> None:
     status_message = await message.bot.send_message(
         chat_id=message.chat.id,
         text=PROGRESS_FRAMES[0],
+        message_thread_id=message.message_thread_id,
         disable_notification=True,
         link_preview_options=NO_LINK_PREVIEW,
     )

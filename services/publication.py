@@ -30,9 +30,10 @@ PUBLICATION_PROMPT = """
 - Українська мова.
 - Нейтральний, новинний стиль без емоцій і закликів.
 - title: короткий самодостатній заголовок, без емодзі та без крапки в кінці.
-- body: 1–3 короткі абзаци, максимум 850 символів; без заголовка, без вердикту, без блоку джерел і без посилань.
+- body: 1–3 короткі абзаци, максимум 850 символів; без заголовка, без вердикту, без блоку джерел і без посилань. Це повна версія для публікації без медіа.
+- media_body: окрема завершена коротка версія тексту для підпису до фото або відео. Один абзац, 180–420 символів, максимум 450 символів. Передай саму суть новини або коректного спростування; не обривай речення і не завершуй трикрапкою.
 - Не вигадуй цитат, посад, дат, подій, причин або деталей.
-- Не згадуй AntiFakeUA чи процес перевірки в body.
+- Не згадуй AntiFakeUA чи процес перевірки в body або media_body.
 """
 
 
@@ -41,8 +42,9 @@ PUBLICATION_SCHEMA = {
     "properties": {
         "title": {"type": "string"},
         "body": {"type": "string"},
+        "media_body": {"type": "string"},
     },
-    "required": ["title", "body"],
+    "required": ["title", "body", "media_body"],
     "additionalProperties": False,
 }
 
@@ -83,11 +85,12 @@ async def generate_publication_draft(request: dict, fact_check: dict) -> dict:
         result = json.loads(response.output_text)
         title = str(result.get("title", "")).strip()
         body = str(result.get("body", "")).strip()
+        media_body = str(result.get("media_body", "")).strip()
 
-        if not title or not body:
-            raise ValueError("GPT повернув порожню чернетку допису")
+        if not title or not body or not media_body:
+            raise ValueError("GPT повернув неповну чернетку допису")
 
-        return {"title": title, "body": body}
+        return {"title": title, "body": body, "media_body": media_body}
 
     except Exception as error:
         print(f"PUBLICATION GPT ERROR: {error}")

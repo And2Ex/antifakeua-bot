@@ -162,8 +162,13 @@ def build_queue_keyboard(requests: list) -> InlineKeyboardMarkup:
 
 
 async def ensure_publication_draft(message: Message, request):
-    if get_saved_publication(request) is not None:
-        return request
+    saved_publication = get_saved_publication(request)
+
+    if saved_publication is not None:
+        has_media_body = bool(saved_publication.get("media_body", "").strip())
+
+        if has_media_body or not has_media(request):
+            return request
 
     fact_check = get_saved_result(request)
 

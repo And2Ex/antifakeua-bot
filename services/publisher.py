@@ -1,5 +1,6 @@
 import json
-from html import escape
+import re
+from html import escape, unescape
 
 from aiogram import Bot
 from aiogram.types import (
@@ -11,13 +12,15 @@ from aiogram.types import (
 
 from config import CHANNEL_ID
 from services.formatter import clean_model_text, format_sources, format_verdict_line
-from services.utils import escape_html, truncate_text
+from services.utils import escape_html
 
 
 NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 TELEGRAM_POST_LIMIT = 4000
 TELEGRAM_CAPTION_LIMIT = 1024
 PHOTO_VIDEO_MEDIA_TYPES = {"photo", "video"}
+HTML_TAG_RE = re.compile(r"<[^>]*>")
+SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
 
 
 def get_saved_result(request) -> dict | None:
@@ -48,11 +51,12 @@ def get_saved_publication(request) -> dict | None:
 
     title = str(publication.get("title", "")).strip()
     body = str(publication.get("body", "")).strip()
+    media_body = str(publication.get("media_body", "")).strip()
 
     if not title or not body:
         return None
 
-    return {"title": title, "body": body}
+    return {"title": title, "body": body, "media_body": media_body}
 
 
 def build_source_reference(request) -> str | None:
@@ -86,12 +90,39 @@ def get_saved_media(request) -> list[dict]:
     return [item for item in media if isinstance(item, dict) and item.get("file_id")]
 
 
+def telegram_text_length(html_text: str) -> int:
+    """Count visible characters as Telegram does after HTML entities are parsed."""
+    visible_text = HTML_TAG_RE.sub("", html_text)
+    return len(unescape(visible_text))
+
+
+def build_complete_excerpt(text: str, max_length: int) -> str:
+    """Return only complete sentences; never publish an interrupted news sentence."""
+    cleaned_text = clean_model_text(text).replace("\n", " ").strip()
+
+    if len(cleaned_text) <= max_length:
+        return cleaned_text
+
+    sentences = [part.strip() for part in SENTENCE_SPLIT_RE.split(cleaned_text) if part.strip()]
+    selected = []
+
+    for sentence in sentences:
+        candidate = " ".join([*selected, sentence])
+
+        if len(candidate) > max_length:
+            break
+
+        selected.append(sentence)
+
+    return " ".join(selected).strip()
+
+
 def _render_channel_post(
     request,
     *,
-    body_limit: int | None,
+    body_text: str | None = None,
     sources_limit: int,
-    title_limit: int | None = None,
+    title_text: str | None = None,
 ) -> str:
     result = get_saved_result(request)
     publication = get_saved_publication(request)
@@ -105,14 +136,8 @@ def _render_channel_post(
             "Відкрий перевірку через кнопку «Публікація»."
         )
 
-    title = clean_model_text(publication["title"])
-    body = clean_model_text(publication["body"])
-
-    if title_limit is not None:
-        title = truncate_text(title, title_limit)
-
-    if body_limit is not None:
-        body = truncate_text(body, body_limit)
+    title = clean_model_text(title_text if title_text is not None else publication["title"])
+    body = clean_model_text(body_text if body_text is not None else publication["body"])
 
     parts = [format_verdict_line(result, include_reason=False)]
     source_reference = build_source_reference(request)
@@ -136,55 +161,63 @@ def _render_channel_post(
     return "\n".join(parts).strip()
 
 
-def _build_fitted_post(
-    request,
-    *,
-    max_length: int,
-    body_limits: tuple[int | None, ...],
-    sources_limits: tuple[int, ...],
-) -> str:
-    for sources_limit in sources_limits:
-        for body_limit in body_limits:
-            post_text = _render_channel_post(
-                request,
-                body_limit=body_limit,
-                sources_limit=sources_limit,
-            )
+def build_channel_post(request) -> str:
+    """Build the ordinary channel message, keeping the full editorial draft."""
+    publication = get_saved_publication(request)
 
-            if len(post_text) <= max_length:
-                return post_text
+    if publication is None:
+        raise ValueError("Чернетку новинного допису ще не створено.")
 
-    fallback_text = _render_channel_post(
-        request,
-        body_limit=80,
-        sources_limit=0,
-        title_limit=100,
-    )
+    for sources_limit in (5, 3, 2, 1, 0):
+        post_text = _render_channel_post(request, sources_limit=sources_limit)
 
-    if len(fallback_text) <= max_length:
-        return fallback_text
+        if telegram_text_length(post_text) <= TELEGRAM_POST_LIMIT:
+            return post_text
+
+    body = build_complete_excerpt(publication["body"], 1800)
+    post_text = _render_channel_post(request, body_text=body, sources_limit=0)
+
+    if telegram_text_length(post_text) <= TELEGRAM_POST_LIMIT:
+        return post_text
 
     raise ValueError("Допис перевищує допустиму довжину Telegram.")
 
 
-def build_channel_post(request) -> str:
-    """Build a full HTML channel message without cutting through HTML tags."""
-    return _build_fitted_post(
-        request,
-        max_length=TELEGRAM_POST_LIMIT,
-        body_limits=(None, 750, 550, 350, 180),
-        sources_limits=(5, 3, 2, 1, 0),
-    )
-
-
 def build_media_caption(request) -> str:
-    """Build a valid HTML caption fitting Telegram's 1024-character media limit."""
-    return _build_fitted_post(
-        request,
-        max_length=TELEGRAM_CAPTION_LIMIT,
-        body_limits=(650, 500, 360, 240, 140, 80),
-        sources_limits=(3, 2, 1, 0),
+    """Build a complete, readable caption within Telegram's 1024-character limit."""
+    publication = get_saved_publication(request)
+
+    if publication is None:
+        raise ValueError("Чернетку новинного допису ще не створено.")
+
+    full_post = _render_channel_post(request, sources_limit=5)
+
+    if telegram_text_length(full_post) <= TELEGRAM_CAPTION_LIMIT:
+        return full_post
+
+    compact_body = publication.get("media_body") or build_complete_excerpt(
+        publication["body"],
+        420,
     )
+    compact_body = build_complete_excerpt(compact_body, 450)
+
+    for sources_limit in (3, 2, 1, 0):
+        caption = _render_channel_post(
+            request,
+            body_text=compact_body,
+            sources_limit=sources_limit,
+        )
+
+        if telegram_text_length(caption) <= TELEGRAM_CAPTION_LIMIT:
+            return caption
+
+    # The news title and source are more useful than a cut-off paragraph.
+    caption = _render_channel_post(request, body_text="", sources_limit=0)
+
+    if telegram_text_length(caption) <= TELEGRAM_CAPTION_LIMIT:
+        return caption
+
+    raise ValueError("Підпис до медіа перевищує допустиму довжину Telegram.")
 
 
 def build_input_media(item: dict, caption: str | None = None):

@@ -1,10 +1,7 @@
-from html import escape
-
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from config import DONATION_SCREENSHOT_WINDOW_HOURS
 from database.db import (
     add_user,
     consume_donation_intent,
@@ -26,9 +23,10 @@ SUPPORT_TEXT = (
     "Сума підтримки довільна, а додатковий ліміт визначається після перевірки переказу.\n\n"
     "<b>Як підтвердити підтримку:</b>\n"
     "1. Відкрий банку кнопкою нижче й зроби переказ.\n"
-    "2. Надішли в цей чат скріншот переказу.\n"
-    "3. Після перевірки ти отримаєш повідомлення про наданий додатковий ліміт.\n\n"
-    f"<i>Скріншот очікуватиметься протягом {DONATION_SCREENSHOT_WINDOW_HOURS} годин після відкриття цього розділу.</i>"
+    "2. Після переказу відкрий або ще раз відкрий пункт <b>«Підтримати»</b>.\n"
+    "3. Надішли в цей чат скріншот оплати — він буде переданий адміністратору.\n"
+    "4. Після перевірки ти отримаєш повідомлення про наданий додатковий ліміт.\n\n"
+    "<i>Часового обмеження немає: після відкриття цього розділу бот прийме наступне надіслане фото як скріншот підтримки.</i>"
 )
 
 
@@ -39,7 +37,7 @@ async def show_support_menu(message: Message) -> None:
         return
 
     add_user(user_id=user.id, username=user.username, first_name=user.first_name)
-    set_donation_intent(user.id, hours=DONATION_SCREENSHOT_WINDOW_HOURS)
+    set_donation_intent(user.id)
 
     await message.answer(
         SUPPORT_TEXT,

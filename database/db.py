@@ -1,6 +1,6 @@
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
@@ -1140,34 +1140,32 @@ def get_chat_source_stats():
     return rows
 
 
-def set_donation_intent(user_id: int, hours: int = 24) -> None:
-    safe_hours = max(int(hours), 1)
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=safe_hours)
-
+def set_donation_intent(user_id: int) -> None:
+    """Mark the next private photo as a support screenshot until it is consumed."""
     connection = get_connection()
     cursor = connection.cursor()
     cursor.execute(
         """
         INSERT INTO donation_intents (user_id, expires_at, updated_at)
-        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        VALUES (%s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id) DO UPDATE SET
-            expires_at = EXCLUDED.expires_at,
+            expires_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (user_id, expires_at),
+        (user_id,),
     )
     connection.commit()
     connection.close()
 
 
 def consume_donation_intent(user_id: int) -> bool:
+    """Consume the active support-screenshot mode without a time limit."""
     connection = get_connection()
     cursor = connection.cursor()
     cursor.execute(
         """
         DELETE FROM donation_intents
         WHERE user_id = %s
-          AND expires_at >= CURRENT_TIMESTAMP
         RETURNING user_id
         """,
         (user_id,),

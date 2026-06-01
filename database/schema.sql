@@ -218,6 +218,7 @@ CREATE INDEX IF NOT EXISTS idx_quick_checks_public_id ON quick_checks(public_id)
 
 CREATE TABLE IF NOT EXISTS donation_intents (
     user_id BIGINT PRIMARY KEY,
+    -- Legacy compatibility column: active intent is consumed by the next photo and does not expire by time.
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP

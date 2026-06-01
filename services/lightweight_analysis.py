@@ -150,7 +150,7 @@ def extract_main_claim(text: str, max_len: int = 300) -> str:
     return clean[:max_len].strip()
 
 
-def suggest_mode(text: str, has_image: bool = False) -> tuple[str, int]:
+def suggest_mode(text: str) -> tuple[str, int]:
     length = len(text or "")
     urls = extract_urls(text)
     emotional = detect_emotional_markers(text)
@@ -167,19 +167,15 @@ def suggest_mode(text: str, has_image: bool = False) -> tuple[str, int]:
     if emotional or stale_risk:
         credits += 1
         mode = "enhanced"
-    if has_image:
-        credits += 2
-        mode = "image_or_ocr"
-
     return mode, min(credits, 5)
 
 
-def analyze_lightweight(text: str, has_image: bool = False) -> LightweightAnalysis:
+def analyze_lightweight(text: str) -> LightweightAnalysis:
     urls = extract_urls(text)
     domains = extract_domains(urls)
     years, dates = extract_dates(text)
     stale_risk, stale_reasons = detect_stale_news_risk(text)
-    mode, credits = suggest_mode(text, has_image=has_image)
+    mode, credits = suggest_mode(text)
 
     return LightweightAnalysis(
         urls=urls,

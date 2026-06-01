@@ -50,7 +50,7 @@ dp.include_router(analytics.router)
 ```python
 from services.lightweight_analysis import analyze_lightweight, format_lightweight_block
 
-local_analysis = analyze_lightweight(user_text, has_image=False)
+local_analysis = analyze_lightweight(user_text)
 local_block = format_lightweight_block(local_analysis)
 ```
 

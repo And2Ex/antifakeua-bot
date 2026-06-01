@@ -39,14 +39,12 @@ def estimate_openai_cost_usd(
     return round(input_cost + output_cost, 6)
 
 
-def credits_for_check(*, text_length: int, has_image: bool = False, deep_search: bool = False) -> int:
+def credits_for_check(*, text_length: int, deep_search: bool = False) -> int:
     credits = 1
     if text_length > 1200:
         credits += 1
     if text_length > 3500:
         credits += 1
-    if has_image:
-        credits += 2
     if deep_search:
         credits += 3
     return min(credits, 10)

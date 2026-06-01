@@ -62,4 +62,3 @@ def require_database_url() -> str:
 
 ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
 FREE_TEXT_LIMIT = parse_int(os.getenv("FREE_TEXT_LIMIT"), 30)
-DONATION_SCREENSHOT_WINDOW_HOURS = parse_int(os.getenv("DONATION_SCREENSHOT_WINDOW_HOURS"), 24)

@@ -3,8 +3,8 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from config import ADMIN_IDS
-from database.db import get_request_by_public_id, update_publication_status
-from services.publisher import publish_check_to_channel
+from database.db import get_request_by_public_id
+from handlers.review import send_publication_draft
 
 
 router = Router()
@@ -37,22 +37,4 @@ async def publish_handler(message: Message):
         await message.answer("Перевірку не знайдено.")
         return
 
-    try:
-        published_message = await publish_check_to_channel(
-            bot=message.bot,
-            request=request,
-        )
-    except Exception as error:
-        await message.answer(f"Не вдалося опублікувати: {error}")
-        return
-
-    update_publication_status(
-        public_id=public_id,
-        status="published",
-        published_message_id=published_message.message_id
-    )
-
-    await message.answer(
-        "Перевірку опубліковано в канал.\n\n"
-        f"message_id: {published_message.message_id}"
-    )
+    await send_publication_draft(message, request)

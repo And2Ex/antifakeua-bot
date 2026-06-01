@@ -377,9 +377,9 @@ async def review_callback(callback: CallbackQuery):
         return
 
     await callback.answer()
-    from handlers.review import send_next_review
+    from handlers.review import send_review_queue
 
-    await send_next_review(callback.message)
+    await send_review_queue(callback.message)
 
 
 @router.callback_query(F.data == "admin:reset_limits")
@@ -685,7 +685,7 @@ async def admin_commands_callback(callback: CallbackQuery):
         "<code>/grant USER_ID 100</code> — надати додатковий ліміт після підтримки\n"
         "<code>/setlimit USER_ID 100</code> — встановити free-ліміт\n"
         "<code>/resetlimits USER_ID</code> — скинути ліміти користувача\n"
-        "<code>/publish check_xxxxx</code> — опублікувати перевірку за ID\n"
+        "<code>/publish check_xxxxx</code> — сформувати чернетку публікації за ID\n"
         "<code>/prompt</code> — показати prompt",
         parse_mode="HTML",
         reply_markup=ADMIN_BACK_KEYBOARD,

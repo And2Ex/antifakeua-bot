@@ -520,6 +520,27 @@ def get_request_by_public_id(public_id: str):
     return request
 
 
+def save_publication_draft(public_id: str, publication: dict) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+    publication_json = json.dumps(publication, ensure_ascii=False)
+
+    cursor.execute(
+        """
+        UPDATE requests
+        SET publication_json = %s
+        WHERE public_id = %s
+        """,
+        (publication_json, public_id),
+    )
+
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
+
+
 def get_next_pending_request():
     connection = get_connection()
     cursor = connection.cursor()
@@ -541,6 +562,56 @@ def get_next_pending_request():
     connection.close()
 
     return request
+
+
+def get_pending_publication_requests(limit: int = 10):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM requests
+        WHERE publication_status = 'pending'
+          AND is_publishable = TRUE
+          AND result_json IS NOT NULL
+          AND response_text IS NOT NULL
+        ORDER BY created_at ASC, id ASC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+    requests = cursor.fetchall()
+    connection.close()
+
+    return requests
+
+
+def skip_pending_publication_requests_through(last_id: int) -> int:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        UPDATE requests
+        SET publication_status = 'skipped',
+            media_json = NULL,
+            media_group_id = NULL
+        WHERE publication_status = 'pending'
+          AND is_publishable = TRUE
+          AND result_json IS NOT NULL
+          AND response_text IS NOT NULL
+          AND id <= %s
+        """,
+        (last_id,),
+    )
+
+    changed = cursor.rowcount
+    connection.commit()
+    connection.close()
+
+    return changed
 
 
 def update_publication_status(

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS requests (
     publication_status TEXT NOT NULL DEFAULT 'pending',
     published_message_id BIGINT,
     result_json TEXT,
+    publication_json TEXT,
     is_publishable BOOLEAN NOT NULL DEFAULT TRUE,
     media_json TEXT,
     media_group_id TEXT,
@@ -40,6 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_requests_publication_status ON requests(publication_status);
 
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS result_json TEXT;
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS publication_json TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS is_publishable BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS media_json TEXT;
 ALTER TABLE requests ADD COLUMN IF NOT EXISTS media_group_id TEXT;

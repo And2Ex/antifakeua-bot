@@ -3,8 +3,15 @@ from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import LinkPreviewOptions, Message, ReplyParameters
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LinkPreviewOptions,
+    Message,
+    ReplyParameters,
+)
 
+from config import ADMIN_IDS
 from database.db import add_request, add_user, get_connection, get_user, remember_content
 from services.admin_notifications import notify_check_completed, notify_new_user
 from keyboards.support import SUPPORT_ENTRY_KEYBOARD
@@ -168,6 +175,19 @@ def build_extra_links(source_link: str | None) -> str:
     return f'📌 <a href="{escape(source_link, quote=True)}">Оригінальний допис</a>'
 
 
+def build_publication_entry_keyboard(public_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📰 Публікація",
+                    callback_data=f"review_open:{public_id}",
+                )
+            ]
+        ]
+    )
+
+
 def get_link_source_type(link: str) -> str:
     normalized = normalize_domain(link)
 
@@ -267,6 +287,7 @@ async def send_final_response(
     source_link: str | None,
     limit_message: str = "",
     reply_parameters: ReplyParameters | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
 ):
     parts = [
         response,
@@ -281,6 +302,7 @@ async def send_final_response(
         parse_mode="HTML",
         link_preview_options=NO_LINK_PREVIEW,
         reply_parameters=reply_parameters,
+        reply_markup=reply_markup,
         disable_notification=False,
     )
 
@@ -372,12 +394,18 @@ async def process_text_check(
             count_verdict=False,
         )
 
+        publication_keyboard = None
+
+        if user.id in ADMIN_IDS and bool(cached_analysis.get("public_mark_allowed", False)):
+            publication_keyboard = build_publication_entry_keyboard(public_id)
+
         await send_final_response(
             requester_message=requester_message,
             response=response,
             source_link=source_link,
             limit_message="",
             reply_parameters=reply_parameters,
+            reply_markup=publication_keyboard,
         )
 
         await notify_check_completed(
@@ -389,6 +417,8 @@ async def process_text_check(
             source_title=source_title,
             from_cache=True,
             text=text,
+            public_id=public_id,
+            is_publishable=bool(cached_analysis.get("public_mark_allowed", False)),
         )
         return
 
@@ -454,12 +484,18 @@ async def process_text_check(
         count_verdict=True,
     )
 
+    publication_keyboard = None
+
+    if user.id in ADMIN_IDS and bool(result.get("public_mark_allowed", False)):
+        publication_keyboard = build_publication_entry_keyboard(public_id)
+
     await send_final_response(
         requester_message=requester_message,
         response=response,
         source_link=source_link,
         limit_message=limit_message,
         reply_parameters=reply_parameters,
+        reply_markup=publication_keyboard,
     )
 
     await notify_check_completed(
@@ -471,6 +507,8 @@ async def process_text_check(
         source_title=source_title,
         from_cache=False,
         text=text,
+        public_id=public_id,
+        is_publishable=bool(result.get("public_mark_allowed", False)),
     )
 
 

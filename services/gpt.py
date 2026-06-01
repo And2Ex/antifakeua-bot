@@ -46,11 +46,10 @@ FACT_CHECK_PROMPT = """
 - для "Правда" залиш порожній рядок, якщо уточнення не потрібне;
 - не дублюй саме слово вердикту.
 
-Поле publication_title:
-- нейтральний короткий заголовок теми повідомлення, без оцінки правдивості;
-- має нагадувати природний заголовок новини й бути зрозумілим сам по собі;
-- не пиши в ньому "правда", "фейк", "підтверджено", "не підтверджено" або висновок аналізу;
-- якщо текст не має теми для новинного заголовка, залиш порожній рядок.
+Поле queue_title:
+- короткий нейтральний заголовок для списку перевірок адміністратора;
+- максимум 90 символів;
+- передає суть повідомлення без вердикту, емодзі та посилань.
 
 Поле summary:
 - 2–4 короткі речення;
@@ -95,7 +94,7 @@ FACT_CHECK_SCHEMA = {
         "short_reason": {
             "type": "string",
         },
-        "publication_title": {
+        "queue_title": {
             "type": "string",
         },
         "summary": {
@@ -136,7 +135,7 @@ FACT_CHECK_SCHEMA = {
         "public_mark_allowed",
         "verdict",
         "short_reason",
-        "publication_title",
+        "queue_title",
         "summary",
         "blocks",
         "sources",
@@ -185,7 +184,7 @@ def build_error_result(message: str) -> dict:
         "public_mark_allowed": False,
         "verdict": "Недостатньо даних",
         "short_reason": "технічна помилка",
-        "publication_title": "",
+        "queue_title": "Перевірка тимчасово недоступна",
         "summary": message,
         "blocks": [],
         "sources": [],

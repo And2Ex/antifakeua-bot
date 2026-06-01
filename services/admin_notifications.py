@@ -22,7 +22,12 @@ def format_user_label(user_id: int | None, username: str | None = None, first_na
     return " | ".join(parts) if parts else "невідомий користувач"
 
 
-async def notify_admins(bot: Bot, title: str, lines: list[str]) -> None:
+async def notify_admins(
+    bot: Bot,
+    title: str,
+    lines: list[str],
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
     if not ADMIN_IDS or not is_admin_notifications_enabled():
         return
 
@@ -34,6 +39,7 @@ async def notify_admins(bot: Bot, title: str, lines: list[str]) -> None:
                 chat_id=admin_id,
                 text=text,
                 parse_mode="HTML",
+                reply_markup=reply_markup,
                 disable_notification=True,
             )
         except Exception as error:
@@ -73,11 +79,27 @@ async def notify_check_completed(
     source_title: str | None,
     from_cache: bool,
     text: str,
+    public_id: str | None = None,
+    is_publishable: bool = False,
 ) -> None:
     snippet = text.strip().replace("\n", " ")
 
     if len(snippet) > 350:
         snippet = snippet[:350] + "..."
+
+    keyboard = None
+
+    if is_publishable and public_id:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📰 Публікація",
+                        callback_data=f"review_open:{public_id}",
+                    )
+                ]
+            ]
+        )
 
     await notify_admins(
         bot,
@@ -90,6 +112,7 @@ async def notify_check_completed(
             "",
             f"<i>{escape(snippet)}</i>",
         ],
+        reply_markup=keyboard,
     )
 
 

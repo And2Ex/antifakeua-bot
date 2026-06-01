@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 
 from config import ADMIN_IDS, GITHUB_URL, METHODOLOGY_URL
 from database.db import add_user, get_request_by_public_id, get_user
+from handlers.review import build_open_publication_keyboard
 from keyboards.menu import (
     BACK_TO_MENU_KEYBOARD,
     FEEDBACK_MENU_KEYBOARD,
@@ -156,10 +157,20 @@ async def start_handler(message: Message, command: CommandObject):
             )
             return
 
+        publication_keyboard = None
+
+        if (
+            user.id in ADMIN_IDS
+            and request.get("is_publishable", False)
+            and request.get("publication_status") == "pending"
+        ):
+            publication_keyboard = build_open_publication_keyboard(request["public_id"])
+
         await message.answer(
             format_public_check(request),
             parse_mode="HTML",
             link_preview_options=NO_LINK_PREVIEW,
+            reply_markup=publication_keyboard,
         )
         return
 

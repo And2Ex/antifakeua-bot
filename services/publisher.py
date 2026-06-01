@@ -2,7 +2,13 @@ import json
 from html import escape
 
 from aiogram import Bot
-from aiogram.types import InputMediaAnimation, InputMediaDocument, InputMediaPhoto, InputMediaVideo, LinkPreviewOptions
+from aiogram.types import (
+    InputMediaAnimation,
+    InputMediaDocument,
+    InputMediaPhoto,
+    InputMediaVideo,
+    LinkPreviewOptions,
+)
 
 from config import CHANNEL_ID
 from services.formatter import clean_model_text, format_sources, format_verdict_line
@@ -22,6 +28,29 @@ def get_saved_result(request) -> dict | None:
         return json.loads(raw_result)
     except (TypeError, json.JSONDecodeError):
         return None
+
+
+def get_saved_publication(request) -> dict | None:
+    raw_publication = request.get("publication_json")
+
+    if not raw_publication:
+        return None
+
+    try:
+        publication = json.loads(raw_publication)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(publication, dict):
+        return None
+
+    title = str(publication.get("title", "")).strip()
+    body = str(publication.get("body", "")).strip()
+
+    if not title or not body:
+        return None
+
+    return {"title": title, "body": body}
 
 
 def build_source_reference(request) -> str | None:
@@ -85,33 +114,30 @@ def build_input_media(item: dict, caption: str | None = None):
 
 def build_channel_post(request) -> str:
     result = get_saved_result(request)
+    publication = get_saved_publication(request)
 
     if result is None:
+        raise ValueError("Результат перевірки не знайдено.")
+
+    if publication is None:
         raise ValueError(
-            "Цю перевірку створено у старому форматі. Перевір її повторно перед публікацією."
+            "Чернетку новинного допису ще не створено. Відкрий перевірку через кнопку «Публікація»."
         )
 
-    title = clean_model_text(result.get("publication_title", "").strip())
-    summary = clean_model_text(result.get("summary", "").strip())
-    blocks = result.get("blocks", [])
+    title = clean_model_text(publication["title"])
+    body = clean_model_text(publication["body"])
     parts = [format_verdict_line(result, include_reason=False)]
 
     if title:
         parts.extend(["", f"<b>{escape_html(title)}</b>"])
 
+    if body:
+        parts.extend(["", escape_html(body)])
+
     source_reference = build_source_reference(request)
 
     if source_reference:
         parts.extend(["", source_reference])
-
-    if summary:
-        parts.extend(["", escape_html(summary)])
-
-    if blocks:
-        block_text = clean_model_text(str(blocks[0].get("text", "")).strip())
-
-        if block_text and block_text.lower() not in summary.lower():
-            parts.extend(["", escape_html(block_text)])
 
     sources = format_sources(result.get("sources", []))
 

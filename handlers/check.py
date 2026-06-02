@@ -30,7 +30,12 @@ from services.reputation import (
     record_source_mention,
     update_source_verdict,
 )
-from services.source_parser import extract_domains, extract_links
+from services.link_reader import fetch_publication_content
+from services.source_parser import (
+    extract_domains,
+    extract_links,
+    is_standalone_link_request,
+)
 from services.utils import generate_text_hash, is_meaningful_text, normalize_text
 
 
@@ -320,15 +325,35 @@ async def process_text_check(
 ):
     source_message = source_message or requester_message
     user = requester_message.from_user
-    text = normalize_text(text)
+    submitted_text = normalize_text(text)
+    links = extract_links(submitted_text)
+    extracted_publication = None
 
-    if not is_meaningful_text(text):
+    if not is_meaningful_text(submitted_text) and not links:
         await requester_message.answer(
             "<b>Немає що перевіряти</b>\n\n"
-            "Надішли текст новини, заяву або конкретне твердження.",
+            "Надішли текст новини, посилання на допис або перешли допис із Telegram.",
             parse_mode="HTML",
         )
         return
+
+    if is_standalone_link_request(submitted_text):
+        extracted_publication = await fetch_publication_content(links[0])
+
+        if extracted_publication is None:
+            await requester_message.answer(
+                "<b>Не вдалося отримати текст публікації</b>\n\n"
+                "Скопіюй текст новини й надішли його сюди або перешли допис із Telegram.",
+                parse_mode="HTML",
+            )
+            return
+
+        text = (
+            f"Посилання на оригінальну публікацію: {links[0]}\n\n"
+            f"Отриманий текст публікації:\n{extracted_publication['content']}"
+        )
+    else:
+        text = submitted_text
 
     is_new_user = get_user(user.id) is None
 
@@ -348,7 +373,10 @@ async def process_text_check(
 
     source_type, source_title, source_link = get_source_info(source_message)
 
-    links = extract_links(text)
+    if extracted_publication is not None:
+        source_type = "submitted_link"
+        source_title = extracted_publication.get("source_title") or source_title
+        source_link = extracted_publication.get("url") or links[0]
 
     if source_link:
         links.append(source_link)
@@ -616,8 +644,9 @@ async def check_command_handler(message: Message):
     await message.answer(
         "<b>Як користуватись командою /check</b>\n\n"
         "У групі відповідай <code>/check</code> на повідомлення, яке треба перевірити.\n\n"
-        "Або напиши так:\n"
-        "<code>/check мобілізацію продовжено</code>",
+        "Або надішли текст чи посилання так:\n"
+        "<code>/check мобілізацію продовжено</code>\n"
+        "<code>/check https://www.instagram.com/p/...</code>",
         parse_mode="HTML",
     )
 

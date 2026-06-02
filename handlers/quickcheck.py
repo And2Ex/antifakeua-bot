@@ -30,7 +30,7 @@ from database.db import (
 from services.cache import get_cached_response, save_cached_response
 from services.source_parser import extract_domains, extract_links
 from services.formatter import format_fact_check_response
-from services.gpt import analyze_text
+from services.gpt import CURRENT_ANALYSIS_REVISION, analyze_text
 from services.limiter import check_and_use_text_limit
 from services.progress import PROGRESS_FRAMES, run_with_progress, safe_delete_message, safe_edit_message
 from services.news_filter import classify_channel_post
@@ -417,8 +417,11 @@ async def process_automatic_post(message: Message) -> None:
 
     cached_result = get_cached_response(normalized)
 
-    # Re-run legacy cached checks once so new flexible verdicts can be generated.
-    if cached_result is not None and not cached_result["result"].get("verdict_family"):
+    # Re-run older cached checks once when verdict selection rules change.
+    if (
+        cached_result is not None
+        and cached_result["result"].get("analysis_revision") != CURRENT_ANALYSIS_REVISION
+    ):
         cached_result = None
 
     if cached_result is None:

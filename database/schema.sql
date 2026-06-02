@@ -3,9 +3,9 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     first_name TEXT,
     plan TEXT NOT NULL DEFAULT 'free',
-    texts_limit INTEGER NOT NULL DEFAULT 30,
+    texts_limit INTEGER NOT NULL DEFAULT 10,
     texts_used INTEGER NOT NULL DEFAULT 0,
-    free_limit INTEGER NOT NULL DEFAULT 30,
+    free_limit INTEGER NOT NULL DEFAULT 10,
     free_used INTEGER NOT NULL DEFAULT 0,
     paid_balance INTEGER NOT NULL DEFAULT 0,
     last_free_reset_month TEXT,
@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS requests (
     media_group_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE users ALTER COLUMN texts_limit SET DEFAULT 10;
+ALTER TABLE users ALTER COLUMN free_limit SET DEFAULT 10;
 
 CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at DESC);

@@ -21,7 +21,7 @@ from services.formatter import (
     format_fact_check_response,
     get_verdict_family,
 )
-from services.gpt import analyze_text
+from services.gpt import CURRENT_ANALYSIS_REVISION, analyze_text
 from services.limiter import check_and_use_text_limit
 from services.progress import PROGRESS_FRAMES, run_with_progress, safe_delete_message
 from services.reputation import (
@@ -368,8 +368,11 @@ async def process_text_check(
 
     cached_result = get_cached_response(text)
 
-    # Re-run legacy cached checks once so new flexible verdicts can be generated.
-    if cached_result is not None and not cached_result["result"].get("verdict_family"):
+    # Re-run older cached checks once when verdict selection rules change.
+    if (
+        cached_result is not None
+        and cached_result["result"].get("analysis_revision") != CURRENT_ANALYSIS_REVISION
+    ):
         cached_result = None
 
     if cached_result is not None:
@@ -656,7 +659,7 @@ async def media_without_text_handler(message: Message):
         "<b>Зображення та відео поки що не аналізуються</b>\n\n"
         "Якщо медіа має опис із новиною, бот перевірить саме цей опис як текст. "
         "Якщо новина написана тільки на зображенні або у відео, скопіюй її текст і надішли окремим повідомленням.\n\n"
-        "Для підтвердження підтримки через Monobank відкрий розділ "
-        "<b>«Підтримати»</b> і саме там надішли скріншот переказу.",
+        "Для передавання підтвердження підтримки відкрий розділ "
+        "<b>«Підтримати»</b> і саме там надішли скріншот підтримки.",
         parse_mode="HTML",
     )

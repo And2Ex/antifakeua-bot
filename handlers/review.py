@@ -14,12 +14,19 @@ from config import ADMIN_IDS
 from database.db import (
     get_pending_publication_requests,
     get_request_by_public_id,
+    refresh_request_fact_check,
     save_publication_draft,
     skip_pending_publication_requests_through,
     update_publication_status,
 )
-from services.formatter import clean_model_text, get_verdict_emoji
+from services.formatter import (
+    clean_model_text,
+    extract_verdict_from_result,
+    format_fact_check_response,
+    get_verdict_emoji,
+)
 from services.progress import safe_delete_message
+from services.gpt import CURRENT_ANALYSIS_REVISION, analyze_text
 from services.publication import generate_publication_draft
 from services.publisher import (
     build_channel_post,
@@ -163,6 +170,40 @@ def build_queue_keyboard(requests: list) -> InlineKeyboardMarkup:
 
 
 async def ensure_publication_draft(message: Message, request):
+    fact_check = get_saved_result(request)
+
+    if fact_check is None:
+        raise ValueError("У перевірці немає збереженого результату фактчеку.")
+
+    # Do not publish an older, overly vague verdict such as "Потребує контексту".
+    # Re-check only when an admin actually starts preparing a channel post.
+    if fact_check.get("analysis_revision") != CURRENT_ANALYSIS_REVISION:
+        refresh_message = await message.answer(
+            "Оновлюю перевірку за актуальними правилами вердиктів…",
+            disable_notification=True,
+        )
+
+        try:
+            fact_check = await analyze_text(str(request.get("request_text", "")))
+            response_text = format_fact_check_response(fact_check)
+            verdict = extract_verdict_from_result(fact_check)
+            refresh_request_fact_check(
+                public_id=request["public_id"],
+                response_text=response_text,
+                verdict=verdict,
+                result=fact_check,
+                is_publishable=bool(fact_check.get("public_mark_allowed", False)),
+            )
+            request = get_request_by_public_id(request["public_id"])
+
+            if request is None:
+                raise ValueError("Не вдалося оновити перевірку.")
+
+            if not request.get("is_publishable", False):
+                raise ValueError("Після оновленої перевірки цей матеріал не призначений для публікації.")
+        finally:
+            await safe_delete_message(refresh_message)
+
     saved_publication = get_saved_publication(request)
 
     if saved_publication is not None:
@@ -170,11 +211,6 @@ async def ensure_publication_draft(message: Message, request):
 
         if has_media_body or not has_media(request):
             return request
-
-    fact_check = get_saved_result(request)
-
-    if fact_check is None:
-        raise ValueError("У перевірці немає збереженого результату фактчеку.")
 
     status_message = await message.answer(
         "Формую готовий новинний допис для каналу…",

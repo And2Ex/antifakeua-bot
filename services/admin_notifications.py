@@ -3,7 +3,13 @@ from html import escape
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import ADMIN_IDS
+from config import (
+    ADMIN_IDS,
+    PACKAGE_BASIC_CHECKS,
+    PACKAGE_BASIC_PRICE_UAH,
+    PACKAGE_PRO_CHECKS,
+    PACKAGE_PRO_PRICE_UAH,
+)
 from database.db import is_admin_notifications_enabled
 
 
@@ -131,8 +137,14 @@ async def notify_donation_screenshot(
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="+100 перевірок", callback_data=f"donation:grant:{submission_id}:100"),
-                InlineKeyboardButton(text="+1000 перевірок", callback_data=f"donation:grant:{submission_id}:1000"),
+                InlineKeyboardButton(
+                    text=f"+{PACKAGE_BASIC_CHECKS} ({PACKAGE_BASIC_PRICE_UAH} грн)",
+                    callback_data=f"donation:grant:{submission_id}:{PACKAGE_BASIC_CHECKS}",
+                ),
+                InlineKeyboardButton(
+                    text=f"+{PACKAGE_PRO_CHECKS} ({PACKAGE_PRO_PRICE_UAH} грн)",
+                    callback_data=f"donation:grant:{submission_id}:{PACKAGE_PRO_CHECKS}",
+                ),
             ],
             [
                 InlineKeyboardButton(text="Відхилити", callback_data=f"donation:reject:{submission_id}"),
@@ -143,8 +155,8 @@ async def notify_donation_screenshot(
         "💙 <b>Новий скріншот підтримки</b>\n\n"
         f"Користувач: {format_user_label(user_id, username, first_name)}\n"
         f"Заявка: <code>#{submission_id}</code>\n\n"
-        "Обери додатковий ліміт або використай команду:\n"
-        f"<code>/grant {user_id} 100</code>"
+        "Звір суму на скріншоті та активуй відповідний пакет або використай команду:\n"
+        f"<code>/grant {user_id} {PACKAGE_BASIC_CHECKS}</code>"
     )
 
     for admin_id in ADMIN_IDS:

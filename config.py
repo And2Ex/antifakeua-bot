@@ -61,4 +61,10 @@ def require_database_url() -> str:
 
 
 ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
-FREE_TEXT_LIMIT = parse_int(os.getenv("FREE_TEXT_LIMIT"), 30)
+FREE_TEXT_LIMIT = parse_int(os.getenv("FREE_TEXT_LIMIT"), 10)
+
+# Internal reference values for admin-granted checks after support; not shown publicly.
+PACKAGE_BASIC_CHECKS = 100
+PACKAGE_BASIC_PRICE_UAH = 129
+PACKAGE_PRO_CHECKS = 1000
+PACKAGE_PRO_PRICE_UAH = 699

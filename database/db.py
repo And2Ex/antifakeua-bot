@@ -15,6 +15,7 @@ SCHEMA_PATH = BASE_DIR / "database" / "schema.sql"
 REQUEST_STATUSES = {"pending", "published", "skipped", "rejected", "quickcheck"}
 SUCCESS_PAYMENT_STATUSES = {"success", "sandbox"}
 CHANNEL_MODES = {"manual", "auto"}
+V042_FREE_LIMIT_MIGRATION_KEY = "migration_v042_free_limit_to_configured_value"
 
 
 def get_connection():
@@ -38,6 +39,42 @@ def init_db() -> None:
         with connection.cursor() as cursor:
             for statement in statements:
                 cursor.execute(statement)
+
+            _apply_v042_free_limit_migration(cursor)
+
+
+def _apply_v042_free_limit_migration(cursor) -> None:
+    """Move accounts that still use the former default quota to the new default once."""
+    cursor.execute(
+        "SELECT value FROM app_settings WHERE key = %s",
+        (V042_FREE_LIMIT_MIGRATION_KEY,),
+    )
+
+    migration = cursor.fetchone()
+
+    if migration is not None and migration["value"] == str(FREE_TEXT_LIMIT):
+        return
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET texts_limit = %s,
+            free_limit = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE texts_limit = 30 AND free_limit = 30
+        """,
+        (FREE_TEXT_LIMIT, FREE_TEXT_LIMIT),
+    )
+    cursor.execute(
+        """
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (V042_FREE_LIMIT_MIGRATION_KEY, str(FREE_TEXT_LIMIT)),
+    )
 
 
 def check_database_connection() -> dict:
@@ -326,7 +363,7 @@ def use_text_quota(user_id: int) -> tuple[bool, str]:
         "<b>Ліміт безкоштовних перевірок вичерпано</b>\n\n"
         f"<b>Безкоштовні перевірки:</b> {free_used}/{free_limit}\n"
         "<b>Додатковий ліміт:</b> 0\n\n"
-        "Підтримати AntiFakeUA добровільним переказом і отримати додатковий ліміт можна через розділ нижче."
+        "Додаткові перевірки можуть бути надані користувачам, які підтримали AntiFakeUA. Відкрий розділ нижче, щоб передати підтвердження підтримки."
     )
 
 
@@ -518,6 +555,49 @@ def get_request_by_public_id(public_id: str):
     connection.close()
 
     return request
+
+
+def refresh_request_fact_check(
+    public_id: str,
+    response_text: str,
+    verdict: str,
+    result: dict,
+    is_publishable: bool,
+) -> bool:
+    """Replace an outdated stored fact-check before an admin drafts publication."""
+    connection = get_connection()
+    cursor = connection.cursor()
+    result_json = json.dumps(result, ensure_ascii=False)
+
+    cursor.execute(
+        """
+        UPDATE requests
+        SET response_text = %s,
+            verdict = %s,
+            result_json = %s,
+            is_publishable = %s,
+            publication_json = NULL,
+            publication_status = CASE
+                WHEN %s THEN publication_status
+                ELSE 'rejected'
+            END
+        WHERE public_id = %s
+        """,
+        (
+            response_text,
+            verdict,
+            result_json,
+            is_publishable,
+            is_publishable,
+            public_id,
+        ),
+    )
+
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
 
 
 def save_publication_draft(public_id: str, publication: dict) -> bool:

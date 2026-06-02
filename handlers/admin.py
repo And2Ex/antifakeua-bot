@@ -9,6 +9,7 @@ from database.db import (
     admin_add_paid_balance,
     approve_donation_and_add_balance,
     approve_latest_pending_donation_for_user,
+    get_default_free_limit,
     get_donation_stats,
     get_donation_submission,
     get_recent_donation_submissions,
@@ -21,14 +22,17 @@ from database.db import (
     get_recent_feedback,
     get_recent_payments,
     get_user,
+    remove_user_custom_free_limit,
     reset_all_limits,
     reset_user_limits,
     set_admin_notifications_enabled,
+    set_default_free_limit,
     set_user_text_limit,
 )
 from keyboards.admin import (
     ADMIN_BACK_KEYBOARD,
     build_admin_notifications_keyboard,
+    build_default_free_limit_keyboard,
     get_admin_keyboard,
 )
 
@@ -267,6 +271,24 @@ async def send_notifications_settings(message: Message) -> None:
     )
 
 
+async def send_default_free_limit_settings(message: Message) -> None:
+    current_limit = get_default_free_limit()
+
+    await message.answer(
+        "⚙️ <b>Стандартний безкоштовний ліміт</b>\n\n"
+        f"Поточне значення: <b>{current_limit} перевірок на місяць</b>.\n\n"
+        "Після зміни:\n"
+        "• нові користувачі одразу отримають новий ліміт;\n"
+        "• для наявних користувачів він застосовується під час наступного місячного оновлення;\n"
+        "• уже доступні в поточному періоді перевірки не забираються;\n"
+        "• додатковий баланс за підтримку не змінюється;\n"
+        "• персональні free-ліміти, встановлені командою <code>/setlimit</code>, залишаються окремими.\n\n"
+        "Інше значення можна встановити командою <code>/setdefaultlimit ЧИСЛО</code>.",
+        parse_mode="HTML",
+        reply_markup=build_default_free_limit_keyboard(current_limit),
+    )
+
+
 @router.message(Command("admin"))
 async def admin_handler(message: Message):
     if not await require_admin_message(message):
@@ -371,6 +393,34 @@ async def admin_notifications_toggle_callback(callback: CallbackQuery):
     await send_notifications_settings(callback.message)
 
 
+@router.callback_query(F.data == "admin:default_free_limit")
+async def default_free_limit_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    await callback.answer()
+    await send_default_free_limit_settings(callback.message)
+
+
+@router.callback_query(F.data.startswith("admin:default_free_limit:set:"))
+async def set_default_free_limit_callback(callback: CallbackQuery):
+    if not await require_admin_callback(callback):
+        return
+
+    try:
+        limit = int(callback.data.rsplit(":", 1)[1])
+    except (ValueError, AttributeError):
+        await callback.answer("Некоректний ліміт.", show_alert=True)
+        return
+
+    if not set_default_free_limit(limit):
+        await callback.answer("Ліміт не може бути від’ємним.", show_alert=True)
+        return
+
+    await callback.answer(f"Новий стандарт: {limit}")
+    await send_default_free_limit_settings(callback.message)
+
+
 @router.callback_query(F.data == "admin:review")
 async def review_callback(callback: CallbackQuery):
     if not await require_admin_callback(callback):
@@ -435,6 +485,61 @@ async def reset_limits_handler(message: Message):
     await message.answer(f"Ліміт користувача {user_id} скинуто разом із додатковим балансом.")
 
 
+@router.message(Command("setdefaultlimit"))
+async def set_default_limit_handler(message: Message):
+    if not await require_admin_message(message):
+        return
+
+    parts = message.text.split()
+
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer(
+            "Неправильний формат.\n\n"
+            "Приклад:\n"
+            "/setdefaultlimit 3"
+        )
+        return
+
+    limit = int(parts[1])
+
+    if not set_default_free_limit(limit):
+        await message.answer("Ліміт не може бути від’ємним.")
+        return
+
+    await message.answer(
+        f"Новий стандартний free-ліміт: {limit} перевірок на місяць.\n\n"
+        "Нові користувачі отримають його одразу, а наявні стандартні користувачі — "
+        "під час наступного місячного оновлення. Додатковий баланс не змінено."
+    )
+
+
+@router.message(Command("usedefaultlimit"))
+async def use_default_limit_handler(message: Message):
+    if not await require_admin_message(message):
+        return
+
+    parts = message.text.split()
+
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer(
+            "Неправильний формат.\n\n"
+            "Приклад:\n"
+            "/usedefaultlimit 486192692"
+        )
+        return
+
+    user_id = int(parts[1])
+
+    if not remove_user_custom_free_limit(user_id):
+        await message.answer("Користувача не знайдено.")
+        return
+
+    await message.answer(
+        f"Персональний free-ліміт користувача {user_id} вимкнено. "
+        "Із наступного щомісячного оновлення застосовуватиметься загальний стандарт."
+    )
+
+
 @router.message(Command("setlimit"))
 async def set_limit_handler(message: Message):
     if not await require_admin_message(message):
@@ -459,7 +564,7 @@ async def set_limit_handler(message: Message):
         return
 
     set_user_text_limit(user_id=user_id, texts_limit=texts_limit)
-    await message.answer(f"Користувачу {user_id} встановлено free-ліміт: {texts_limit}")
+    await message.answer(f"Користувачу {user_id} встановлено персональний free-ліміт: {texts_limit}")
 
 
 @router.message(Command("paymentsrecent"))
@@ -683,7 +788,9 @@ async def admin_commands_callback(callback: CallbackQuery):
         "🧰 <b>Технічні адмін-команди</b>\n\n"
         "Вони не показуються в меню Telegram, але працюють вручну:\n\n"
         "<code>/grant USER_ID 100</code> — надати додатковий ліміт після підтримки\n"
-        "<code>/setlimit USER_ID 100</code> — встановити free-ліміт\n"
+        "<code>/setdefaultlimit 3</code> — змінити стандартний місячний free-ліміт\n"
+        "<code>/setlimit USER_ID 100</code> — встановити персональний free-ліміт\n"
+        "<code>/usedefaultlimit USER_ID</code> — повернути користувача до загального стандарту з наступного оновлення\n"
         "<code>/resetlimits USER_ID</code> — скинути ліміти користувача\n"
         "<code>/publish check_xxxxx</code> — сформувати чернетку публікації за ID\n"
         "<code>/prompt</code> — показати prompt",

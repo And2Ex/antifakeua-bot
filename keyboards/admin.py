@@ -16,6 +16,9 @@ ADMIN_PANEL_KEYBOARD = InlineKeyboardMarkup(
         ],
         [
             InlineKeyboardButton(text="🧾 Черга публікацій", callback_data="admin:review"),
+            InlineKeyboardButton(text="⚙️ Free-ліміт", callback_data="admin:default_free_limit"),
+        ],
+        [
             InlineKeyboardButton(text="♻️ Скинути free-ліміти", callback_data="admin:reset_limits"),
         ],
         [
@@ -44,3 +47,24 @@ def build_admin_notifications_keyboard(enabled: bool) -> InlineKeyboardMarkup:
 
 def get_admin_keyboard() -> InlineKeyboardMarkup:
     return ADMIN_PANEL_KEYBOARD
+
+
+def build_default_free_limit_keyboard(current_limit: int) -> InlineKeyboardMarkup:
+    options = [3, 5, 10, 20]
+    buttons = []
+
+    for value in options:
+        prefix = "✅ " if value == current_limit else ""
+        buttons.append(
+            InlineKeyboardButton(
+                text=f"{prefix}{value}",
+                callback_data=f"admin:default_free_limit:set:{value}",
+            )
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            buttons,
+            [InlineKeyboardButton(text="⬅️ До адмін-панелі", callback_data="admin:menu")],
+        ]
+    )

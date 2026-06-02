@@ -11,7 +11,7 @@ from config import ADMIN_IDS
 async def setup_bot_commands(bot):
     private_commands = [
         BotCommand(command="start", description="головне меню"),
-        BotCommand(command="quickcheck", description="автоперевірка для мого каналу"),
+        BotCommand(command="quickcheck", description="коротка перевірка для мого каналу"),
         BotCommand(command="support", description="підтримати проєкт"),
         BotCommand(command="limits", description="мій баланс перевірок"),
     ]
@@ -23,7 +23,7 @@ async def setup_bot_commands(bot):
 
     group_commands = [
         BotCommand(command="check", description="повна перевірка повідомлення через reply"),
-        BotCommand(command="quickcheck", description="керування короткою автоперевіркою"),
+        BotCommand(command="quickcheck", description="керування короткою перевіркою"),
     ]
 
     await bot.set_my_commands(

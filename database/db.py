@@ -6,7 +6,7 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import dict_row
 
-from config import FREE_TEXT_LIMIT, require_database_url
+from config import DEFAULT_INITIAL_FREE_LIMIT, require_database_url
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,7 +15,8 @@ SCHEMA_PATH = BASE_DIR / "database" / "schema.sql"
 REQUEST_STATUSES = {"pending", "published", "skipped", "rejected", "quickcheck"}
 SUCCESS_PAYMENT_STATUSES = {"success", "sandbox"}
 CHANNEL_MODES = {"manual", "auto"}
-V042_FREE_LIMIT_MIGRATION_KEY = "migration_v042_free_limit_to_configured_value"
+DEFAULT_FREE_LIMIT_KEY = "default_free_limit"
+V048_CUSTOM_LIMIT_MIGRATION_KEY = "migration_v048_mark_custom_free_limits"
 
 
 def get_connection():
@@ -40,40 +41,49 @@ def init_db() -> None:
             for statement in statements:
                 cursor.execute(statement)
 
-            _apply_v042_free_limit_migration(cursor)
+            _ensure_default_free_limit_setting(cursor)
+            _mark_existing_personal_free_limits(cursor)
 
 
-def _apply_v042_free_limit_migration(cursor) -> None:
-    """Move accounts that still use the former default quota to the new default once."""
+def _ensure_default_free_limit_setting(cursor) -> None:
+    """Seed the default monthly free quota only for a new or unmigrated database."""
     cursor.execute(
-        "SELECT value FROM app_settings WHERE key = %s",
-        (V042_FREE_LIMIT_MIGRATION_KEY,),
+        """
+        INSERT INTO app_settings (key, value, updated_at)
+        VALUES (%s, %s, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO NOTHING
+        """,
+        (DEFAULT_FREE_LIMIT_KEY, str(DEFAULT_INITIAL_FREE_LIMIT)),
     )
 
-    migration = cursor.fetchone()
 
-    if migration is not None and migration["value"] == str(FREE_TEXT_LIMIT):
+def _mark_existing_personal_free_limits(cursor) -> None:
+    """Preserve older individually assigned limits on their future monthly resets."""
+    cursor.execute(
+        "SELECT value FROM app_settings WHERE key = %s",
+        (V048_CUSTOM_LIMIT_MIGRATION_KEY,),
+    )
+
+    if cursor.fetchone() is not None:
         return
 
+    # 30 and 10 were historical default limits; other pre-existing values are
+    # treated as personal administrator assignments.
     cursor.execute(
         """
         UPDATE users
-        SET texts_limit = %s,
-            free_limit = %s,
+        SET custom_free_limit = TRUE,
             updated_at = CURRENT_TIMESTAMP
-        WHERE texts_limit = 30 AND free_limit = 30
-        """,
-        (FREE_TEXT_LIMIT, FREE_TEXT_LIMIT),
+        WHERE free_limit NOT IN (10, 30)
+        """
     )
     cursor.execute(
         """
         INSERT INTO app_settings (key, value, updated_at)
         VALUES (%s, %s, CURRENT_TIMESTAMP)
-        ON CONFLICT(key) DO UPDATE SET
-            value = excluded.value,
-            updated_at = CURRENT_TIMESTAMP
+        ON CONFLICT(key) DO NOTHING
         """,
-        (V042_FREE_LIMIT_MIGRATION_KEY, str(FREE_TEXT_LIMIT)),
+        (V048_CUSTOM_LIMIT_MIGRATION_KEY, "done"),
     )
 
 
@@ -120,6 +130,25 @@ def set_app_setting(key: str, value: str) -> None:
 
     connection.commit()
     connection.close()
+
+
+def get_default_free_limit() -> int:
+    raw_value = get_app_setting(DEFAULT_FREE_LIMIT_KEY, str(DEFAULT_INITIAL_FREE_LIMIT))
+
+    try:
+        value = int(raw_value or DEFAULT_INITIAL_FREE_LIMIT)
+    except ValueError:
+        return DEFAULT_INITIAL_FREE_LIMIT
+
+    return max(value, 0)
+
+
+def set_default_free_limit(limit: int) -> bool:
+    if limit < 0:
+        return False
+
+    set_app_setting(DEFAULT_FREE_LIMIT_KEY, str(limit))
+    return True
 
 
 def is_admin_notifications_enabled() -> bool:
@@ -219,6 +248,7 @@ def remember_content(
 
 def add_user(user_id: int, username: str | None, first_name: str | None):
     month = current_month()
+    default_free_limit = get_default_free_limit()
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -239,7 +269,7 @@ def add_user(user_id: int, username: str | None, first_name: str | None):
             first_name = excluded.first_name,
             updated_at = CURRENT_TIMESTAMP
         """,
-        (user_id, username, first_name, FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, month)
+        (user_id, username, first_name, default_free_limit, default_free_limit, month)
     )
 
     connection.commit()
@@ -263,27 +293,42 @@ def get_user(user_id: int):
 
 def reset_monthly_free_limit_if_needed(user_id: int):
     month = current_month()
+    default_free_limit = get_default_free_limit()
 
     connection = get_connection()
     cursor = connection.cursor()
 
     cursor.execute(
-        "SELECT last_free_reset_month FROM users WHERE user_id = %s",
+        "SELECT last_free_reset_month, custom_free_limit FROM users WHERE user_id = %s",
         (user_id,)
     )
     user = cursor.fetchone()
 
     if user is not None and user["last_free_reset_month"] != month:
-        cursor.execute(
-            """
-            UPDATE users
-            SET free_used = 0,
-                last_free_reset_month = %s,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = %s
-            """,
-            (month, user_id)
-        )
+        if user["custom_free_limit"]:
+            cursor.execute(
+                """
+                UPDATE users
+                SET free_used = 0,
+                    last_free_reset_month = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s
+                """,
+                (month, user_id)
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE users
+                SET texts_limit = %s,
+                    free_limit = %s,
+                    free_used = 0,
+                    last_free_reset_month = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s
+                """,
+                (default_free_limit, default_free_limit, month, user_id)
+            )
 
     connection.commit()
     connection.close()
@@ -453,6 +498,7 @@ def set_user_text_limit(user_id: int, texts_limit: int):
         UPDATE users
         SET texts_limit = %s,
             free_limit = %s,
+            custom_free_limit = TRUE,
             updated_at = CURRENT_TIMESTAMP
         WHERE user_id = %s
         """,
@@ -461,6 +507,27 @@ def set_user_text_limit(user_id: int, texts_limit: int):
 
     connection.commit()
     connection.close()
+
+
+def remove_user_custom_free_limit(user_id: int) -> bool:
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        UPDATE users
+        SET custom_free_limit = FALSE,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = %s
+        """,
+        (user_id,)
+    )
+    changed = cursor.rowcount > 0
+
+    connection.commit()
+    connection.close()
+
+    return changed
 
 
 def add_request(
@@ -920,6 +987,7 @@ def update_payment_status(
 
 
 def process_successful_payment(order_id: str, callback_data: dict) -> dict:
+    default_free_limit = get_default_free_limit()
     connection = get_connection()
     cursor = connection.cursor()
 
@@ -972,7 +1040,7 @@ def process_successful_payment(order_id: str, callback_data: dict) -> dict:
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (user_id) DO NOTHING
             """,
-            (payment["user_id"], FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month())
+            (payment["user_id"], default_free_limit, default_free_limit, current_month())
         )
 
         cursor.execute(
@@ -1082,6 +1150,7 @@ def admin_add_paid_balance(user_id: int, checks: int) -> bool:
     if checks <= 0:
         return False
 
+    default_free_limit = get_default_free_limit()
     connection = get_connection()
     cursor = connection.cursor()
 
@@ -1091,7 +1160,7 @@ def admin_add_paid_balance(user_id: int, checks: int) -> bool:
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (user_id) DO NOTHING
         """,
-        (user_id, FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month())
+        (user_id, default_free_limit, default_free_limit, current_month())
     )
 
     cursor.execute(
@@ -1432,6 +1501,7 @@ def approve_donation_and_add_balance(
     if checks_added <= 0:
         return None
 
+    default_free_limit = get_default_free_limit()
     connection = get_connection()
     cursor = connection.cursor()
     cursor.execute(
@@ -1455,7 +1525,7 @@ def approve_donation_and_add_balance(
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (user_id) DO NOTHING
         """,
-        (submission["user_id"], FREE_TEXT_LIMIT, FREE_TEXT_LIMIT, current_month()),
+        (submission["user_id"], default_free_limit, default_free_limit, current_month()),
     )
     cursor.execute(
         """
@@ -1636,6 +1706,68 @@ def set_channel_mode(chat_id: int, mode: str, enabled_by: int) -> bool:
         WHERE chat_id = %s
         """,
         (mode, enabled_by, chat_id),
+    )
+
+    changed = cursor.rowcount > 0
+    connection.commit()
+    connection.close()
+
+    return changed
+
+
+def remember_latest_channel_post(
+    *,
+    chat_id: int,
+    message_id: int,
+    post_text: str | None,
+    source_link: str | None,
+    media_group_id: str | None = None,
+) -> bool:
+    """Store the latest original channel post for manual QuickCheck.
+
+    For an album, Telegram usually places the caption on only one media item.
+    Later items in the same album update the target message position while
+    preserving the caption and original link already received for that group.
+    """
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        UPDATE channel_settings
+        SET latest_post_message_id = %s,
+            latest_post_text = CASE
+                WHEN %s IS NOT NULL
+                     AND latest_post_media_group_id = %s
+                     AND %s IS NULL
+                THEN latest_post_text
+                ELSE %s
+            END,
+            latest_post_source_link = CASE
+                WHEN %s IS NOT NULL
+                     AND latest_post_media_group_id = %s
+                     AND %s IS NULL
+                THEN latest_post_source_link
+                ELSE %s
+            END,
+            latest_post_media_group_id = %s,
+            latest_post_seen_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE chat_id = %s AND chat_type = 'channel'
+        """,
+        (
+            message_id,
+            media_group_id,
+            media_group_id,
+            post_text,
+            post_text,
+            media_group_id,
+            media_group_id,
+            post_text,
+            source_link,
+            media_group_id,
+            chat_id,
+        ),
     )
 
     changed = cursor.rowcount > 0

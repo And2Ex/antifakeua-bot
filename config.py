@@ -41,16 +41,6 @@ def parse_admin_ids(value: str) -> set[int]:
     return admin_ids
 
 
-def parse_int(value: str | None, default: int) -> int:
-    if value is None:
-        return default
-
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
 def require_database_url() -> str:
     if not DATABASE_URL:
         raise RuntimeError(
@@ -61,7 +51,9 @@ def require_database_url() -> str:
 
 
 ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
-FREE_TEXT_LIMIT = parse_int(os.getenv("FREE_TEXT_LIMIT"), 10)
+
+# Used only to initialize app_settings on a new database. Afterwards the admin-panel setting is authoritative.
+DEFAULT_INITIAL_FREE_LIMIT = 10
 
 # Internal reference values for admin-granted checks after support; not shown publicly.
 PACKAGE_BASIC_CHECKS = 100

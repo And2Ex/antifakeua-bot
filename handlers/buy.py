@@ -2,11 +2,11 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from config import FREE_TEXT_LIMIT
 from database.db import (
     add_user,
     consume_donation_intent,
     create_donation_submission,
+    get_default_free_limit,
     has_donation_intent,
     set_donation_intent,
 )
@@ -17,17 +17,20 @@ from services.admin_notifications import notify_donation_screenshot
 router = Router()
 
 
-SUPPORT_TEXT = (
-    "💙 <b>Підтримати AntiFakeUA</b>\n\n"
-    f"Щомісяця доступно <b>{FREE_TEXT_LIMIT} безкоштовних перевірок</b>. "
-    "Користувачі, які підтримали проєкт, можуть отримати додаткові перевірки.\n\n"
-    "Додаткові перевірки додаються до балансу й не згорають після щомісячного оновлення безкоштовного ліміту.\n\n"
-    "<b>Як передати підтвердження підтримки:</b>\n"
-    "1. Відкрий банку кнопкою нижче та підтримай проєкт.\n"
-    "2. Повернися до бота й відкрий пункт <b>«Підтримати»</b>.\n"
-    "3. Саме в цьому розділі надішли скріншот підтримки — він буде переданий адміністратору.\n\n"
-    "<i>Скріншот потрібно надсилати саме в розділі «Підтримати».</i>"
-)
+def build_support_text() -> str:
+    free_limit = get_default_free_limit()
+
+    return (
+        "💙 <b>Підтримати AntiFakeUA</b>\n\n"
+        f"Щомісяця доступно <b>{free_limit} безкоштовних перевірок</b>. "
+        "Користувачі, які підтримали проєкт, можуть отримати додаткові перевірки.\n\n"
+        "Додаткові перевірки додаються до балансу й не згорають після щомісячного оновлення безкоштовного ліміту.\n\n"
+        "<b>Як передати підтвердження підтримки:</b>\n"
+        "1. Відкрий банку кнопкою нижче та підтримай проєкт.\n"
+        "2. Повернися до бота й відкрий пункт <b>«Підтримати»</b>.\n"
+        "3. Саме в цьому розділі надішли скріншот підтримки — він буде переданий адміністратору.\n\n"
+        "<i>Скріншот потрібно надсилати саме в розділі «Підтримати».</i>"
+    )
 
 
 async def show_support_menu(message: Message) -> None:
@@ -40,7 +43,7 @@ async def show_support_menu(message: Message) -> None:
     set_donation_intent(user.id)
 
     await message.answer(
-        SUPPORT_TEXT,
+        build_support_text(),
         parse_mode="HTML",
         reply_markup=build_support_keyboard(),
         disable_notification=True,

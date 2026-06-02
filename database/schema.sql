@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     texts_used INTEGER NOT NULL DEFAULT 0,
     free_limit INTEGER NOT NULL DEFAULT 10,
     free_used INTEGER NOT NULL DEFAULT 0,
+    custom_free_limit BOOLEAN NOT NULL DEFAULT FALSE,
     paid_balance INTEGER NOT NULL DEFAULT 0,
     last_free_reset_month TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS requests (
 
 ALTER TABLE users ALTER COLUMN texts_limit SET DEFAULT 10;
 ALTER TABLE users ALTER COLUMN free_limit SET DEFAULT 10;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_free_limit BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at DESC);
@@ -202,6 +204,12 @@ CREATE TABLE IF NOT EXISTS channel_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT channel_settings_mode_check CHECK (mode IN ('manual', 'auto'))
 );
+
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS latest_post_message_id BIGINT;
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS latest_post_text TEXT;
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS latest_post_source_link TEXT;
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS latest_post_media_group_id TEXT;
+ALTER TABLE channel_settings ADD COLUMN IF NOT EXISTS latest_post_seen_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS quick_checks (
     id BIGSERIAL PRIMARY KEY,

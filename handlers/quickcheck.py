@@ -22,6 +22,7 @@ from database.db import (
     add_user,
     complete_quick_check,
     remember_content,
+    remember_latest_channel_post,
     get_channel_setting,
     reserve_quick_check,
     save_channel_setting,
@@ -104,23 +105,41 @@ def channel_picker_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def toggle_keyboard(chat_id: int, mode: str) -> InlineKeyboardMarkup:
+def settings_keyboard(chat_id: int, mode: str, chat_type: str) -> InlineKeyboardMarkup:
     target_mode = "manual" if mode == "auto" else "auto"
-    text = (
+    toggle_text = (
         "Вимкнути автоматичну перевірку"
         if mode == "auto"
         else "Увімкнути автоматичну перевірку"
     )
+    rows = [
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"quick_toggle:{chat_id}:{target_mode}")]
+    ]
 
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=text, callback_data=f"quick_toggle:{chat_id}:{target_mode}")]
-        ]
-    )
+    if chat_type == "channel":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🔎 Перевірити останній допис",
+                    callback_data=f"quick_manual:{chat_id}",
+                )
+            ]
+        )
+
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_settings_text(chat_title: str, mode: str) -> str:
+def build_settings_text(chat_title: str, mode: str, chat_type: str = "channel") -> str:
     status = "увімкнена" if mode == "auto" else "вимкнена"
+    manual_text = ""
+
+    if chat_type == "channel":
+        manual_text = (
+            "\n\nКнопка <b>«Перевірити останній допис»</b> запускає коротку "
+            "перевірку останнього допису, який бот уже отримав із цього каналу, "
+            "навіть якщо автоматична перевірка не поставила під ним позначку. "
+            "У ручному режимі перевірка не запускається сама."
+        )
 
     return (
         "<b>QuickCheck для каналу</b>\n\n"
@@ -128,9 +147,11 @@ def build_settings_text(chat_title: str, mode: str) -> str:
         f"<b>Автоматична коротка перевірка:</b> {status}\n\n"
         "У режимі автоматичної перевірки бот реагує лише на дописи, "
         "схожі на новини або фактичні твердження. Рекламні й неперевірювані "
-        "повідомлення залишаються без позначки.\n\n"
-        "Нові автоматичні перевірки використовують доступний баланс адміністратора, який увімкнув режим. "
-        "Посилання AntiFakeUA у короткій позначці відкриває повний висновок і джерела."
+        "повідомлення залишаються без позначки."
+        f"{manual_text}\n\n"
+        "Перевірка використовує доступний баланс адміністратора, який її запускає "
+        "або вмикає автоматичний режим. Посилання AntiFakeUA у короткій позначці "
+        "відкриває повний висновок і джерела."
     )
 
 
@@ -221,9 +242,9 @@ async def show_channel_settings(message: Message, chat_id: int, chat_title: str,
         )
 
     await message.answer(
-        build_settings_text(chat_title, mode),
+        build_settings_text(chat_title, mode, chat_type),
         parse_mode="HTML",
-        reply_markup=toggle_keyboard(chat_id, mode),
+        reply_markup=settings_keyboard(chat_id, mode, chat_type),
         link_preview_options=NO_LINK_PREVIEW,
         disable_notification=True,
     )
@@ -350,6 +371,16 @@ async def toggle_channel_quickcheck(callback: CallbackQuery):
     status = "ввімкнено" if new_mode == "auto" else "вимкнено"
 
     await callback.answer(f"Автоматичну коротку перевірку {status}.")
+
+    if setting["chat_type"] == "channel":
+        await callback.message.edit_text(
+            build_settings_text(setting["chat_title"] or "Обраний канал", new_mode, "channel"),
+            parse_mode="HTML",
+            reply_markup=settings_keyboard(chat_id, new_mode, "channel"),
+            link_preview_options=NO_LINK_PREVIEW,
+        )
+        return
+
     await callback.message.edit_text(
         f"✅ Автоматичну коротку перевірку {status}.",
         parse_mode="HTML",
@@ -366,39 +397,42 @@ async def toggle_channel_quickcheck(callback: CallbackQuery):
     asyncio.create_task(delete_later(callback.message))
 
 
-async def process_automatic_post(message: Message) -> None:
-    text = get_post_text(message)
-
-    if not text:
-        return
-
+async def process_quick_post(
+    *,
+    bot,
+    chat_id: int,
+    message_id: int,
+    message_thread_id: int | None,
+    text: str,
+    setting: dict,
+    source_type: str,
+    source_title: str,
+    source_link: str | None,
+    bypass_local_filter: bool = False,
+) -> str:
     normalized = normalize_text(text)
 
-    if is_own_marker(normalized):
-        return
+    if not normalized or is_own_marker(normalized):
+        return "ignored"
 
-    setting = get_channel_setting(message.chat.id)
+    # Автоматичний QuickCheck використовує локальний фільтр, щоб не витрачати
+    # запити на очевидно непридатні дописи. Ручний запуск адміністратора навмисно
+    # обходить цей етап: остаточну придатність позначки визначає аналіз із джерелами.
+    if not bypass_local_filter:
+        decision = classify_channel_post(normalized)
 
-    if setting is None or setting["mode"] != "auto":
-        return
-
-    # Локальний фільтр лише відсіює очевидно непридатні дописи.
-    # Він не визначає правдивість: остаточний вердикт формує аналіз із джерелами.
-    decision = classify_channel_post(normalized)
-
-    if not decision.eligible:
-        return
+        if not decision.eligible:
+            return "not_eligible"
 
     post_hash = generate_text_hash(normalized)
 
     if not reserve_quick_check(
-        chat_id=message.chat.id,
-        message_id=message.message_id,
+        chat_id=chat_id,
+        message_id=message_id,
         post_hash=post_hash,
     ):
-        return
+        return "already_processed"
 
-    source_type, source_title, source_link = get_post_source_info(message)
     links = extract_links(normalized)
 
     if source_link:
@@ -429,16 +463,16 @@ async def process_automatic_post(message: Message) -> None:
 
         if not limit_allowed:
             complete_quick_check(
-                chat_id=message.chat.id,
-                message_id=message.message_id,
+                chat_id=chat_id,
+                message_id=message_id,
                 status="skipped_no_balance",
             )
-            return
+            return "skipped_no_balance"
 
-    status_message = await message.bot.send_message(
-        chat_id=message.chat.id,
+    status_message = await bot.send_message(
+        chat_id=chat_id,
         text=PROGRESS_FRAMES[0],
-        message_thread_id=message.message_thread_id,
+        message_thread_id=message_thread_id,
         disable_notification=True,
         link_preview_options=NO_LINK_PREVIEW,
     )
@@ -465,22 +499,22 @@ async def process_automatic_post(message: Message) -> None:
         print(f"QUICKCHECK ERROR: {error}")
         await safe_delete_message(status_message)
         complete_quick_check(
-            chat_id=message.chat.id,
-            message_id=message.message_id,
+            chat_id=chat_id,
+            message_id=message_id,
             status="failed",
         )
-        return
+        return "failed"
 
     if not result.get("public_mark_allowed", False):
         await safe_delete_message(status_message)
         complete_quick_check(
-            chat_id=message.chat.id,
-            message_id=message.message_id,
+            chat_id=chat_id,
+            message_id=message_id,
             status="ignored",
             verdict=result.get("verdict"),
             short_note=result.get("short_reason"),
         )
-        return
+        return "ignored"
 
     public_id = add_request(
         user_id=setting["enabled_by"],
@@ -503,13 +537,13 @@ async def process_automatic_post(message: Message) -> None:
     if not mark_text:
         await safe_delete_message(status_message)
         complete_quick_check(
-            chat_id=message.chat.id,
-            message_id=message.message_id,
+            chat_id=chat_id,
+            message_id=message_id,
             status="ignored",
             verdict=result.get("verdict"),
             short_note=result.get("short_reason"),
         )
-        return
+        return "ignored"
 
     marker_updated = await safe_edit_message(
         status_message,
@@ -519,8 +553,8 @@ async def process_automatic_post(message: Message) -> None:
     )
 
     complete_quick_check(
-        chat_id=message.chat.id,
-        message_id=message.message_id,
+        chat_id=chat_id,
+        message_id=message_id,
         status="published" if marker_updated else "failed_marker_edit",
         verdict=result.get("verdict"),
         short_note=result.get("short_reason"),
@@ -529,9 +563,124 @@ async def process_automatic_post(message: Message) -> None:
         was_reply=False,
     )
 
+    return "published" if marker_updated else "failed_marker_edit"
+
+
+async def process_automatic_post(message: Message) -> None:
+    text = get_post_text(message)
+
+    if not text:
+        return
+
+    normalized = normalize_text(text)
+
+    if is_own_marker(normalized) or normalized in PROGRESS_FRAMES:
+        return
+
+    setting = get_channel_setting(message.chat.id)
+
+    if setting is None or setting["mode"] != "auto":
+        return
+
+    source_type, source_title, source_link = get_post_source_info(message)
+    await process_quick_post(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        message_id=message.message_id,
+        message_thread_id=message.message_thread_id,
+        text=text,
+        setting=setting,
+        source_type=source_type,
+        source_title=source_title,
+        source_link=source_link,
+    )
+
+
+@router.callback_query(F.data.startswith("quick_manual:"))
+async def manual_latest_channel_post(callback: CallbackQuery):
+    if callback.from_user is None or callback.message is None:
+        return
+
+    _, raw_chat_id = callback.data.split(":", 1)
+    chat_id = int(raw_chat_id)
+    setting = get_channel_setting(chat_id)
+
+    if setting is None or setting["chat_type"] != "channel":
+        await callback.answer("Спочатку обери канал заново.", show_alert=True)
+        return
+
+    if not await bot_can_post_to_channel(callback, chat_id):
+        await callback.answer("Бот більше не має права публікувати в цьому каналі.", show_alert=True)
+        return
+
+    if not await user_is_chat_admin(callback, chat_id, callback.from_user.id):
+        await callback.answer("Недостатньо прав адміністратора.", show_alert=True)
+        return
+
+    message_id = setting.get("latest_post_message_id")
+    post_text = setting.get("latest_post_text")
+
+    if message_id is None:
+        await callback.answer(
+            "Бот ще не отримував дописів із цього каналу після підключення.",
+            show_alert=True,
+        )
+        return
+
+    if not post_text:
+        await callback.answer(
+            "Останній допис не містить тексту або підпису для перевірки.",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer("Перевіряю останній допис каналу.")
+    manual_setting = dict(setting)
+    manual_setting["enabled_by"] = callback.from_user.id
+    outcome = await process_quick_post(
+        bot=callback.bot,
+        chat_id=chat_id,
+        message_id=message_id,
+        message_thread_id=None,
+        text=post_text,
+        setting=manual_setting,
+        source_type="channel",
+        source_title=setting["chat_title"] or "Telegram-канал",
+        source_link=setting.get("latest_post_source_link"),
+        bypass_local_filter=True,
+    )
+
+    notices = {
+        "already_processed": "Цей останній допис уже перевірено.",
+        "not_eligible": "Автоматичний відбір не визначив цей допис як перевірювану новину.",
+        "skipped_no_balance": "Недостатньо доступних перевірок для запуску QuickCheck.",
+        "ignored": "Перевірку виконано, але коротка публічна позначка для цього допису недоречна.",
+        "failed": "Не вдалося виконати коротку перевірку. Спробуй ще раз пізніше.",
+        "failed_marker_edit": "Перевірку виконано, але не вдалося опублікувати коротку позначку.",
+    }
+
+    if outcome in notices:
+        await callback.message.answer(notices[outcome], disable_notification=True)
+
 
 @router.channel_post()
 async def auto_channel_post_handler(message: Message):
+    text = get_post_text(message)
+    normalized = normalize_text(text) if text else ""
+
+    if normalized not in PROGRESS_FRAMES and not is_own_marker(normalized):
+        setting = get_channel_setting(message.chat.id)
+
+        if setting is not None:
+            _, _, source_link = get_post_source_info(message)
+            remember_latest_channel_post(
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                post_text=text,
+                source_link=source_link,
+                media_group_id=message.media_group_id,
+            )
+
     await process_automatic_post(message)
 
 

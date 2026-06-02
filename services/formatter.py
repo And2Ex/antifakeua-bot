@@ -137,7 +137,14 @@ def format_fact_check_response(result: dict) -> str:
         if not block_text or is_duplicate_block(block_text, summary, added_block_texts):
             continue
 
-        parts.extend(["", escape_html(block_text)])
+        if str(block.get("type", "")).strip() == "Уточнення":
+            display_text = re.sub(r"^Уточнення\s*:\s*", "", block_text, flags=re.IGNORECASE).strip()
+            if not display_text:
+                continue
+            parts.extend(["", f"<b>Уточнення:</b> {escape_html(display_text)}"])
+        else:
+            parts.extend(["", escape_html(block_text)])
+
         added_block_texts.add(normalize_for_compare(block_text))
 
     formatted_sources = format_sources(sources)

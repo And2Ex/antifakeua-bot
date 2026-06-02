@@ -175,7 +175,7 @@ async def ensure_publication_draft(message: Message, request):
     if fact_check is None:
         raise ValueError("У перевірці немає збереженого результату фактчеку.")
 
-    # Do not publish an older, overly vague verdict such as "Потребує контексту".
+    # Do not publish an older verdict policy, including vague or qualified-truth labels.
     # Re-check only when an admin actually starts preparing a channel post.
     if fact_check.get("analysis_revision") != CURRENT_ANALYSIS_REVISION:
         refresh_message = await message.answer(

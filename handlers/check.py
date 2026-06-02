@@ -30,7 +30,6 @@ from services.reputation import (
     record_source_mention,
     update_source_verdict,
 )
-from services.link_reader import fetch_publication_content
 from services.source_parser import (
     extract_domains,
     extract_links,
@@ -327,7 +326,6 @@ async def process_text_check(
     user = requester_message.from_user
     submitted_text = normalize_text(text)
     links = extract_links(submitted_text)
-    extracted_publication = None
 
     if not is_meaningful_text(submitted_text) and not links:
         await requester_message.answer(
@@ -337,23 +335,7 @@ async def process_text_check(
         )
         return
 
-    if is_standalone_link_request(submitted_text):
-        extracted_publication = await fetch_publication_content(links[0])
-
-        if extracted_publication is None:
-            await requester_message.answer(
-                "<b>Не вдалося отримати текст публікації</b>\n\n"
-                "Скопіюй текст новини й надішли його сюди або перешли допис із Telegram.",
-                parse_mode="HTML",
-            )
-            return
-
-        text = (
-            f"Посилання на оригінальну публікацію: {links[0]}\n\n"
-            f"Отриманий текст публікації:\n{extracted_publication['content']}"
-        )
-    else:
-        text = submitted_text
+    text = submitted_text
 
     is_new_user = get_user(user.id) is None
 
@@ -373,10 +355,10 @@ async def process_text_check(
 
     source_type, source_title, source_link = get_source_info(source_message)
 
-    if extracted_publication is not None:
+    if is_standalone_link_request(submitted_text):
         source_type = "submitted_link"
-        source_title = extracted_publication.get("source_title") or source_title
-        source_link = extracted_publication.get("url") or links[0]
+        source_title = normalize_domain(links[0]) or "Посилання на публікацію"
+        source_link = links[0]
 
     if source_link:
         links.append(source_link)

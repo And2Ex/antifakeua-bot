@@ -66,10 +66,10 @@ def normalize_verdict_label(verdict: str | None) -> str:
     label = re.sub(r"\s+", " ", label).strip(" —:-")
 
     if not label:
-        return "Недостатньо даних"
+        return "Непідтверджено"
 
     if len(label) > 45:
-        return "Недостатньо даних"
+        return "Непідтверджено"
 
     return label
 

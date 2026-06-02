@@ -407,7 +407,7 @@ async def process_text_check(
 
         record_detected_sources(
             public_id=public_id,
-            verdict=cached_result["verdict"] or "Недостатньо даних",
+            verdict=cached_result["verdict"] or "Непідтверджено",
             verdict_family=get_verdict_family(cached_analysis),
             source_type=source_type,
             source_title=source_title,

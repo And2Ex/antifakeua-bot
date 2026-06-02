@@ -69,7 +69,7 @@ async def generate_publication_draft(request: dict, fact_check: dict) -> dict:
         "original_text": request.get("request_text", ""),
         "original_source_title": request.get("source_title", ""),
         "verdict_family": get_verdict_family(fact_check),
-        "verdict": fact_check.get("verdict", "Недостатньо даних"),
+        "verdict": fact_check.get("verdict", "Непідтверджено"),
         "verified_summary": fact_check.get("summary", ""),
         "verified_details": fact_check.get("blocks", []),
         "verification_sources": fact_check.get("sources", []),

@@ -125,7 +125,7 @@ def build_queue_text(requests: list) -> str:
 
     for index, request in enumerate(requests, start=1):
         result = get_saved_result(request) or {}
-        verdict = request.get("verdict") or "Недостатньо даних"
+        verdict = request.get("verdict") or "Непідтверджено"
         emoji = get_verdict_emoji(result or verdict)
         title = get_queue_title(request)
         url = build_public_check_url(request["public_id"])
